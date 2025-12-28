@@ -24,8 +24,12 @@ export function getMatchState(matchId) {
   return request(`/api/matches/${matchId}/state/`);
 }
 
-export function getChunk(matchId, chunkQ, chunkR) {
-  return request(`/api/matches/${matchId}/chunks/${chunkQ}/${chunkR}/`);
+export function getChunk(matchId, chunkQ, chunkR, turnNumber) {
+  const params =
+    Number.isFinite(turnNumber) && turnNumber > 0
+      ? `?turn=${turnNumber}`
+      : "";
+  return request(`/api/matches/${matchId}/chunks/${chunkQ}/${chunkR}/${params}`);
 }
 
 export function getTurnState(matchId, turnNumber) {

@@ -639,6 +639,23 @@ def chunk_detail(request, match_id, chunk_q, chunk_r):
     chunk = get_object_or_404(
         Chunk, match_id=match_id, chunk_q=chunk_q, chunk_r=chunk_r
     )
+    turn_param = request.query_params.get("turn")
+    snapshot_province_to_land = None
+    snapshot_land_to_kingdom = None
+    if turn_param is not None:
+        try:
+            turn_number = int(turn_param)
+        except ValueError:
+            return Response(
+                {"detail": "turn must be an integer"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        turn = get_object_or_404(chunk.match.turns, number=turn_number)
+        if turn.status == turn.STATUS_RESOLVED:
+            state = turn.state or {}
+            snapshot_province_to_land = state.get("province_to_land")
+            snapshot_land_to_kingdom = state.get("land_to_kingdom")
+
     cells = chunk.tiles.get("cells", [])
     province_ids = {
         cell.get("province_id")
@@ -647,17 +664,34 @@ def chunk_detail(request, match_id, chunk_q, chunk_r):
     }
     province_to_land = {}
     land_ids = set()
-    if province_ids:
-        for province in Province.objects.filter(id__in=province_ids).values(
-            "id", "land_id"
-        ):
-            province_to_land[str(province["id"])] = province["land_id"]
-            if province["land_id"] is not None:
-                land_ids.add(province["land_id"])
-    land_to_kingdom = {}
-    if land_ids:
-        for land in Land.objects.filter(id__in=land_ids).values("id", "kingdom_id"):
-            land_to_kingdom[str(land["id"])] = land["kingdom_id"]
+    if (
+        province_ids
+        and snapshot_province_to_land is not None
+        and snapshot_land_to_kingdom is not None
+    ):
+        for province_id in province_ids:
+            key = str(province_id)
+            if key in snapshot_province_to_land:
+                land_id = snapshot_province_to_land.get(key)
+                province_to_land[key] = land_id
+                if land_id is not None:
+                    land_ids.add(land_id)
+        land_to_kingdom = {
+            str(land_id): snapshot_land_to_kingdom.get(str(land_id))
+            for land_id in land_ids
+        }
+    else:
+        if province_ids:
+            for province in Province.objects.filter(id__in=province_ids).values(
+                "id", "land_id"
+            ):
+                province_to_land[str(province["id"])] = province["land_id"]
+                if province["land_id"] is not None:
+                    land_ids.add(province["land_id"])
+        land_to_kingdom = {}
+        if land_ids:
+            for land in Land.objects.filter(id__in=land_ids).values("id", "kingdom_id"):
+                land_to_kingdom[str(land["id"])] = land["kingdom_id"]
     towns = []
     if province_ids:
         for town in Town.objects.filter(

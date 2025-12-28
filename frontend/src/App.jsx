@@ -469,8 +469,15 @@ export default function App() {
 
   const loadTurnState = async (targetTurn) => {
     try {
-      const state = await getTurnState(matchId, targetTurn);
+      const [state, chunk] = await Promise.all([
+        getTurnState(matchId, targetTurn),
+        getChunk(matchId, chunkQ, chunkR, targetTurn),
+      ]);
       setTurnState(state.state || {});
+      setTiles(chunk.tiles?.cells || []);
+      setProvinceToLand(chunk.province_to_land || {});
+      setLandToKingdom(chunk.land_to_kingdom || {});
+      setTowns(chunk.towns || []);
       setStatus("");
     } catch (error) {
       setTurnState(null);
@@ -500,12 +507,6 @@ export default function App() {
 
       const nextTurn = Math.min(turnNumber, resolved);
       setTurnNumber(nextTurn);
-
-      const chunk = await getChunk(matchId, chunkQ, chunkR);
-      setTiles(chunk.tiles?.cells || []);
-      setProvinceToLand(chunk.province_to_land || {});
-      setLandToKingdom(chunk.land_to_kingdom || {});
-      setTowns(chunk.towns || []);
 
       await loadTurnState(nextTurn);
     } catch (error) {

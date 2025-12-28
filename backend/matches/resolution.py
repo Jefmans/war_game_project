@@ -5,7 +5,7 @@ from units.models import Unit
 from world.pathfinding import find_path
 from world.terrain import movement_cost
 from world.tiles import TileCache
-from world.models import Land, Town
+from world.models import Land, Province, Town
 
 
 def resolve_turn(turn):
@@ -42,6 +42,7 @@ def resolve_turn(turn):
 def build_turn_state(match, result=None):
     if result is None:
         result = {"status": "pending"}
+    province_to_land, land_to_kingdom = _build_ownership_snapshot(match)
     units = (
         Unit.objects.filter(match=match)
         .select_related("unit_type", "owner_kingdom")
@@ -63,6 +64,8 @@ def build_turn_state(match, result=None):
         "generated_at": timezone.now().isoformat(),
         "units": unit_payload,
         "result": result,
+        "province_to_land": province_to_land,
+        "land_to_kingdom": land_to_kingdom,
     }
 
 
@@ -153,3 +156,21 @@ def _capture_town(match, unit, position):
         "province_id": province.id,
         "kingdom_id": unit.owner_kingdom_id,
     }
+
+
+def _build_ownership_snapshot(match):
+    province_to_land = {}
+    land_ids = set()
+    for row in Province.objects.filter(match=match).values("id", "land_id"):
+        province_id = row["id"]
+        land_id = row["land_id"]
+        province_to_land[str(province_id)] = land_id
+        if land_id is not None:
+            land_ids.add(land_id)
+
+    land_to_kingdom = {}
+    if land_ids:
+        for row in Land.objects.filter(id__in=land_ids).values("id", "kingdom_id"):
+            land_to_kingdom[str(row["id"])] = row["kingdom_id"]
+
+    return province_to_land, land_to_kingdom
