@@ -229,6 +229,7 @@ def create_match(request):
                 land_max=chunk_options["land_max"],
                 kingdom_min=chunk_options["kingdom_min"],
                 kingdom_max=chunk_options["kingdom_max"],
+                no_kingdoms=True,
             )
             match.refresh_from_db(fields=["world_seed"])
             Land.objects.filter(match=match).update(kingdom=None)

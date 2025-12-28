@@ -107,6 +107,7 @@ class Command(BaseCommand):
         parser.add_argument("--land-max", type=int, default=24)
         parser.add_argument("--kingdom-min", type=int, default=1)
         parser.add_argument("--kingdom-max", type=int, default=4)
+        parser.add_argument("--no-kingdoms", action="store_true")
 
     def handle(self, *args, **options):
         match_id = options["match"]
@@ -123,6 +124,7 @@ class Command(BaseCommand):
         land_max = options["land_max"]
         kingdom_min = options["kingdom_min"]
         kingdom_max = options["kingdom_max"]
+        no_kingdoms = options["no_kingdoms"]
 
         if (chunk_q is None) != (chunk_r is None):
             raise CommandError("Provide both --chunk-q and --chunk-r.")
@@ -174,6 +176,7 @@ class Command(BaseCommand):
                     land_max=land_max,
                     kingdom_min=kingdom_min,
                     kingdom_max=kingdom_max,
+                    no_kingdoms=no_kingdoms,
                     seed=seed,
                 )
 
@@ -199,6 +202,7 @@ class Command(BaseCommand):
         land_max,
         kingdom_min,
         kingdom_max,
+        no_kingdoms,
         seed,
     ):
         base_q = chunk_q * size
@@ -240,25 +244,26 @@ class Command(BaseCommand):
             for province_id in group:
                 province_to_land[province_id] = land.id
 
-        land_adjacency = {land_id: set() for land_id in land_ids}
-        for province_id, neighbors in province_adjacency.items():
-            land_id = province_to_land.get(province_id)
-            if land_id is None:
-                continue
-            for neighbor_province_id in neighbors:
-                neighbor_land_id = province_to_land.get(neighbor_province_id)
-                if neighbor_land_id and neighbor_land_id != land_id:
-                    land_adjacency[land_id].add(neighbor_land_id)
-
-        land_groups = _group_graph(
-            land_ids, land_adjacency, rng, kingdom_min, kingdom_max
-        )
-
         kingdom_ids = []
-        for group in land_groups:
-            kingdom = Kingdom.objects.create(match=match)
-            kingdom_ids.append(kingdom.id)
-            Land.objects.filter(id__in=group).update(kingdom=kingdom)
+        if not no_kingdoms:
+            land_adjacency = {land_id: set() for land_id in land_ids}
+            for province_id, neighbors in province_adjacency.items():
+                land_id = province_to_land.get(province_id)
+                if land_id is None:
+                    continue
+                for neighbor_province_id in neighbors:
+                    neighbor_land_id = province_to_land.get(neighbor_province_id)
+                    if neighbor_land_id and neighbor_land_id != land_id:
+                        land_adjacency[land_id].add(neighbor_land_id)
+
+            land_groups = _group_graph(
+                land_ids, land_adjacency, rng, kingdom_min, kingdom_max
+            )
+
+            for group in land_groups:
+                kingdom = Kingdom.objects.create(match=match)
+                kingdom_ids.append(kingdom.id)
+                Land.objects.filter(id__in=group).update(kingdom=kingdom)
 
         cells = [
             {
