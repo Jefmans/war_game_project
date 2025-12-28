@@ -87,6 +87,7 @@ export default function App() {
 
     const app = new PIXI.Application();
     let disposed = false;
+    let initialized = false;
 
     appRef.current = app;
 
@@ -97,6 +98,7 @@ export default function App() {
         resizeTo: containerRef.current,
       });
 
+      initialized = true;
       if (disposed) {
         app.destroy(true);
         return;
@@ -123,7 +125,9 @@ export default function App() {
 
     return () => {
       disposed = true;
-      app.destroy(true);
+      if (initialized) {
+        app.destroy(true);
+      }
       appRef.current = null;
     };
   }, []);
