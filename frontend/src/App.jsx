@@ -25,6 +25,10 @@ const OWNED_BORDER_WIDTH = 2.6;
 const OWNED_BORDER_ALPHA = 1;
 const SELECTED_TILE_STROKE = { width: 2.4, color: 0xfbbf24, alpha: 0.9 };
 const SELECTED_TILE_FILL = { color: 0xfbbf24, alpha: 0.08 };
+const MIN_ZOOM = 0.6;
+const MAX_ZOOM = 2.8;
+const ZOOM_STEP = 1.1;
+const PAN_DRAG_THRESHOLD = 4;
 
 const TERRAIN_COLORS = {
   plains: 0x5b8f64,
@@ -174,6 +178,15 @@ export default function App() {
   const canvasRef = useRef(null);
   const layersRef = useRef(null);
   const tilePositionsRef = useRef(new Map());
+  const viewRef = useRef({ baseX: 0, baseY: 0, panX: 0, panY: 0, scale: 1 });
+  const panRef = useRef({
+    isDragging: false,
+    startX: 0,
+    startY: 0,
+    startPanX: 0,
+    startPanY: 0,
+    wasDrag: false,
+  });
 
   const displayTurn = viewMode === "live" ? liveTurnNumber : turnNumber;
   const canGoPrev = viewMode === "playback" && turnNumber > 1;
@@ -565,7 +578,11 @@ export default function App() {
     const height = appRef.current.renderer.height;
     const offsetX = width / 2 - (minX + maxX) / 2;
     const offsetY = height / 2 - (minY + maxY) / 2;
-    root.position.set(offsetX, offsetY);
+    const view = viewRef.current;
+    view.baseX = offsetX;
+    view.baseY = offsetY;
+    root.scale.set(view.scale);
+    root.position.set(offsetX + view.panX, offsetY + view.panY);
   }, [
     tiles,
     provinceToLand,
@@ -602,7 +619,14 @@ export default function App() {
     if (!canvas || !layers) {
       return;
     }
+    const view = viewRef.current;
+    const panState = panRef.current;
+
     const handleClick = (event) => {
+      if (panState.wasDrag) {
+        panState.wasDrag = false;
+        return;
+      }
       const positions = tilePositionsRef.current;
       if (!positions.size) {
         return;
@@ -610,8 +634,9 @@ export default function App() {
       const rect = canvas.getBoundingClientRect();
       const clickX = event.clientX - rect.left;
       const clickY = event.clientY - rect.top;
-      const worldX = clickX - layers.root.position.x;
-      const worldY = clickY - layers.root.position.y;
+      const scale = view.scale || 1;
+      const worldX = (clickX - layers.root.position.x) / scale;
+      const worldY = (clickY - layers.root.position.y) / scale;
 
       let bestKey = null;
       let bestDist = Infinity;
@@ -633,8 +658,84 @@ export default function App() {
       setSelectedTile({ q, r });
     };
 
+    const handlePointerDown = (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+      panState.isDragging = true;
+      panState.wasDrag = false;
+      panState.startX = event.clientX;
+      panState.startY = event.clientY;
+      panState.startPanX = view.panX;
+      panState.startPanY = view.panY;
+      canvas.setPointerCapture(event.pointerId);
+    };
+
+    const handlePointerMove = (event) => {
+      if (!panState.isDragging) {
+        return;
+      }
+      const dx = event.clientX - panState.startX;
+      const dy = event.clientY - panState.startY;
+      if (!panState.wasDrag) {
+        if (Math.abs(dx) + Math.abs(dy) < PAN_DRAG_THRESHOLD) {
+          return;
+        }
+        panState.wasDrag = true;
+      }
+      view.panX = panState.startPanX + dx;
+      view.panY = panState.startPanY + dy;
+      layers.root.position.set(view.baseX + view.panX, view.baseY + view.panY);
+    };
+
+    const handlePointerUp = (event) => {
+      panState.isDragging = false;
+      canvas.releasePointerCapture(event.pointerId);
+    };
+
+    const handlePointerLeave = () => {
+      panState.isDragging = false;
+    };
+
+    const handleWheel = (event) => {
+      event.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const cursorX = event.clientX - rect.left;
+      const cursorY = event.clientY - rect.top;
+      const oldScale = view.scale || 1;
+      const zoomFactor = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+      const nextScale = Math.min(
+        MAX_ZOOM,
+        Math.max(MIN_ZOOM, oldScale * zoomFactor)
+      );
+      if (nextScale === oldScale) {
+        return;
+      }
+      const worldX = (cursorX - layers.root.position.x) / oldScale;
+      const worldY = (cursorY - layers.root.position.y) / oldScale;
+      const nextX = cursorX - worldX * nextScale;
+      const nextY = cursorY - worldY * nextScale;
+      view.scale = nextScale;
+      view.panX = nextX - view.baseX;
+      view.panY = nextY - view.baseY;
+      layers.root.scale.set(nextScale);
+      layers.root.position.set(nextX, nextY);
+    };
+
     canvas.addEventListener("click", handleClick);
-    return () => canvas.removeEventListener("click", handleClick);
+    canvas.addEventListener("pointerdown", handlePointerDown);
+    canvas.addEventListener("pointermove", handlePointerMove);
+    canvas.addEventListener("pointerup", handlePointerUp);
+    canvas.addEventListener("pointerleave", handlePointerLeave);
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      canvas.removeEventListener("click", handleClick);
+      canvas.removeEventListener("pointerdown", handlePointerDown);
+      canvas.removeEventListener("pointermove", handlePointerMove);
+      canvas.removeEventListener("pointerup", handlePointerUp);
+      canvas.removeEventListener("pointerleave", handlePointerLeave);
+      canvas.removeEventListener("wheel", handleWheel);
+    };
   }, [tiles]);
 
   useEffect(() => {

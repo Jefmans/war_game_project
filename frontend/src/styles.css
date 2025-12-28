@@ -255,6 +255,15 @@ button:disabled {
   height: 100%;
 }
 
+.map-canvas canvas {
+  cursor: grab;
+  touch-action: none;
+}
+
+.map-canvas canvas:active {
+  cursor: grabbing;
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;
