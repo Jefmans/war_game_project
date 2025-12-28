@@ -1,4 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import * as PIXI from "pixi.js";
 import {
   getChunk,
@@ -20,7 +26,7 @@ const ICON_BG_ALPHA = 0.75;
 const ICON_BG_RADIUS = 0.65;
 const TOWN_NEUTRAL_COLOR = 0xcbd5e1;
 const UNIT_NEUTRAL_COLOR = 0xd1d5db;
-const OWNED_TILE_ALPHA = 0.2;
+const OWNED_TILE_ALPHA = 0.3;
 const OWNED_BORDER_WIDTH = 2.6;
 const OWNED_BORDER_ALPHA = 1;
 const SELECTED_TILE_STROKE = { width: 2.4, color: 0xfbbf24, alpha: 0.9 };
@@ -29,6 +35,17 @@ const MIN_ZOOM = 0.6;
 const MAX_ZOOM = 2.8;
 const ZOOM_STEP = 1.1;
 const PAN_DRAG_THRESHOLD = 4;
+const PATH_STROKE = { width: 2, color: 0xfbbf24, alpha: 0.85 };
+const PATH_NODE = { radius: 3.5, color: 0xfbbf24, alpha: 0.9 };
+const UNIT_CLICK_RADIUS = HEX_SIZE * 0.8;
+const MOVEMENT_COSTS = {
+  plains: 1,
+  forest: 2,
+  hills: 2,
+  swamp: 3,
+  water: null,
+  mountain: null,
+};
 
 const TERRAIN_COLORS = {
   plains: 0x5b8f64,
@@ -123,6 +140,141 @@ function formatColor(color) {
   return `#${color.toString(16).padStart(6, "0")}`;
 }
 
+function movementCost(terrain) {
+  if (terrain === undefined || terrain === null) {
+    return 1;
+  }
+  if (!Object.prototype.hasOwnProperty.call(MOVEMENT_COSTS, terrain)) {
+    return 1;
+  }
+  return MOVEMENT_COSTS[terrain];
+}
+
+function hexDistance(a, b) {
+  const [aq, ar] = a;
+  const [bq, br] = b;
+  return (
+    (Math.abs(aq - bq) +
+      Math.abs(aq + ar - bq - br) +
+      Math.abs(ar - br)) /
+    2
+  );
+}
+
+function findPath(tileIndex, start, goal, blocked = new Set()) {
+  if (start[0] === goal[0] && start[1] === goal[1]) {
+    return [start];
+  }
+  const startKey = `${start[0]},${start[1]}`;
+  const goalKey = `${goal[0]},${goal[1]}`;
+  if (blocked.has(startKey) || blocked.has(goalKey)) {
+    return null;
+  }
+  const startTile = tileIndex.get(startKey);
+  const goalTile = tileIndex.get(goalKey);
+  if (!startTile || !goalTile) {
+    return null;
+  }
+  if (movementCost(goalTile.terrain) === null) {
+    return null;
+  }
+
+  const open = [{ key: startKey, q: start[0], r: start[1], f: hexDistance(start, goal) }];
+  const cameFrom = new Map();
+  const gScore = new Map([[startKey, 0]]);
+
+  while (open.length) {
+    open.sort((a, b) => a.f - b.f);
+    const current = open.shift();
+    if (!current) {
+      break;
+    }
+    if (current.key === goalKey) {
+      const path = [[current.q, current.r]];
+      let curKey = current.key;
+      while (cameFrom.has(curKey)) {
+        const prev = cameFrom.get(curKey);
+        path.push([prev.q, prev.r]);
+        curKey = prev.key;
+      }
+      path.reverse();
+      return path;
+    }
+
+    for (const [dq, dr] of NEIGHBOR_OFFSETS) {
+      const nq = current.q + dq;
+      const nr = current.r + dr;
+      const nKey = `${nq},${nr}`;
+      if (blocked.has(nKey)) {
+        continue;
+      }
+      const tile = tileIndex.get(nKey);
+      if (!tile) {
+        continue;
+      }
+      const stepCost = movementCost(tile.terrain);
+      if (stepCost === null) {
+        continue;
+      }
+      const tentative = gScore.get(current.key) + stepCost;
+      if (tentative < (gScore.get(nKey) ?? Infinity)) {
+        cameFrom.set(nKey, { key: current.key, q: current.q, r: current.r });
+        gScore.set(nKey, tentative);
+        const f = tentative + hexDistance([nq, nr], goal);
+        const existing = open.find((node) => node.key === nKey);
+        if (existing) {
+          existing.f = f;
+        } else {
+          open.push({ key: nKey, q: nq, r: nr, f });
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function buildOrdersFromPath(path, tileIndex, movePoints) {
+  if (!path || path.length < 2) {
+    return [];
+  }
+  const orders = [];
+  let segmentStart = 0;
+  let spent = 0;
+
+  for (let i = 1; i < path.length; i += 1) {
+    const [q, r] = path[i];
+    const tile = tileIndex.get(`${q},${r}`);
+    if (!tile) {
+      return [];
+    }
+    const stepCost = movementCost(tile?.terrain);
+    if (stepCost === null) {
+      return [];
+    }
+    if (spent + stepCost > movePoints) {
+      if (i - 1 === segmentStart) {
+        return [];
+      }
+      const [dq, dr] = path[i - 1];
+      orders.push({ q: dq, r: dr });
+      segmentStart = i - 1;
+      spent = 0;
+    }
+    spent += stepCost;
+    if (spent === movePoints) {
+      orders.push({ q, r });
+      segmentStart = i;
+      spent = 0;
+    }
+  }
+
+  if (segmentStart < path.length - 1) {
+    const [q, r] = path[path.length - 1];
+    orders.push({ q, r });
+  }
+  return orders;
+}
+
 function addIconWithBackground(layer, texture, pos, size, tint) {
   const container = new PIXI.Container();
   container.position.set(pos.x, pos.y);
@@ -167,6 +319,7 @@ export default function App() {
   const [selectedParticipantId, setSelectedParticipantId] = useState(null);
   const [selectedUnitId, setSelectedUnitId] = useState(null);
   const [selectedTile, setSelectedTile] = useState(null);
+  const [routePath, setRoutePath] = useState([]);
   const [pendingOrders, setPendingOrders] = useState([]);
   const [orderStatus, setOrderStatus] = useState("");
   const [orderLoading, setOrderLoading] = useState(false);
@@ -178,6 +331,7 @@ export default function App() {
   const canvasRef = useRef(null);
   const layersRef = useRef(null);
   const tilePositionsRef = useRef(new Map());
+  const tileIndexRef = useRef(new Map());
   const viewRef = useRef({ baseX: 0, baseY: 0, panX: 0, panY: 0, scale: 1 });
   const panRef = useRef({
     isDragging: false,
@@ -220,6 +374,11 @@ export default function App() {
     );
   }, [selectedParticipant, turnState]);
 
+  const selectedUnit = useMemo(
+    () => ownedUnits.find((unit) => unit.id === selectedUnitId) || null,
+    [ownedUnits, selectedUnitId]
+  );
+
   const statusMessage = useMemo(() => {
     if (loading) {
       return "Loading map data...";
@@ -261,8 +420,17 @@ export default function App() {
   }, [ownedUnits, selectedUnitId]);
 
   useEffect(() => {
+    setRoutePath([]);
+    setSelectedTile(null);
     setPendingOrders([]);
     setOrderStatus("");
+  }, [selectedUnitId]);
+
+  useEffect(() => {
+    setPendingOrders([]);
+    setOrderStatus("");
+    setRoutePath([]);
+    setSelectedTile(null);
   }, [selectedParticipantId]);
 
   useEffect(() => {
@@ -336,6 +504,7 @@ export default function App() {
       const landBordersLayer = new PIXI.Graphics();
       const provinceBordersLayer = new PIXI.Graphics();
       const ownershipBordersLayer = new PIXI.Graphics();
+      const pathLayer = new PIXI.Graphics();
       const selectionLayer = new PIXI.Graphics();
       const townLayer = new PIXI.Container();
       const unitFallbackLayer = new PIXI.Graphics();
@@ -345,6 +514,7 @@ export default function App() {
       root.addChild(landBordersLayer);
       root.addChild(provinceBordersLayer);
       root.addChild(ownershipBordersLayer);
+      root.addChild(pathLayer);
       root.addChild(selectionLayer);
       root.addChild(townLayer);
       root.addChild(unitFallbackLayer);
@@ -357,6 +527,7 @@ export default function App() {
         landBordersLayer,
         provinceBordersLayer,
         ownershipBordersLayer,
+        pathLayer,
         selectionLayer,
         townLayer,
         unitFallbackLayer,
@@ -415,6 +586,7 @@ export default function App() {
     });
 
     tilePositionsRef.current = positions;
+    tileIndexRef.current = tileIndex;
 
     const provinceToLandMap = provinceToLand || {};
     const landToKingdomMap = landToKingdom || {};
@@ -614,6 +786,39 @@ export default function App() {
   }, [selectedTile, tiles]);
 
   useEffect(() => {
+    if (!layersRef.current) {
+      return;
+    }
+    const { pathLayer } = layersRef.current;
+    pathLayer.clear();
+    if (!routePath || routePath.length < 2) {
+      return;
+    }
+    const positions = tilePositionsRef.current;
+    const first = positions.get(`${routePath[0][0]},${routePath[0][1]}`);
+    if (!first) {
+      return;
+    }
+    pathLayer.moveTo(first.x, first.y);
+    for (let i = 1; i < routePath.length; i += 1) {
+      const key = `${routePath[i][0]},${routePath[i][1]}`;
+      const pos = positions.get(key);
+      if (!pos) {
+        continue;
+      }
+      pathLayer.lineTo(pos.x, pos.y);
+    }
+    pathLayer.stroke(PATH_STROKE);
+    routePath.forEach(([q, r]) => {
+      const pos = positions.get(`${q},${r}`);
+      if (!pos) {
+        return;
+      }
+      pathLayer.circle(pos.x, pos.y, PATH_NODE.radius).fill(PATH_NODE);
+    });
+  }, [routePath, tiles]);
+
+  useEffect(() => {
     const layers = layersRef.current;
     const canvas = canvasRef.current;
     if (!canvas || !layers) {
@@ -638,6 +843,32 @@ export default function App() {
       const worldX = (clickX - layers.root.position.x) / scale;
       const worldY = (clickY - layers.root.position.y) / scale;
 
+      let clickedUnit = null;
+      let closestUnitDist = Infinity;
+      ownedUnits.forEach((unit) => {
+        const pos = positions.get(`${unit.q},${unit.r}`);
+        if (!pos) {
+          return;
+        }
+        const dx = pos.x - worldX;
+        const dy = pos.y - worldY;
+        const dist = dx * dx + dy * dy;
+        if (dist < closestUnitDist) {
+          closestUnitDist = dist;
+          clickedUnit = unit;
+        }
+      });
+
+      if (
+        clickedUnit &&
+        closestUnitDist <= UNIT_CLICK_RADIUS * UNIT_CLICK_RADIUS
+      ) {
+        setSelectedUnitId(clickedUnit.id);
+        setRoutePath([]);
+        setOrderStatus("");
+        return;
+      }
+
       let bestKey = null;
       let bestDist = Infinity;
       positions.forEach((pos, key) => {
@@ -656,6 +887,11 @@ export default function App() {
       }
       const [q, r] = bestKey.split(",").map(Number);
       setSelectedTile({ q, r });
+      if (selectedUnit) {
+        planRouteTo({ q, r });
+      } else {
+        setRoutePath([]);
+      }
     };
 
     const handlePointerDown = (event) => {
@@ -736,7 +972,7 @@ export default function App() {
       canvas.removeEventListener("pointerleave", handlePointerLeave);
       canvas.removeEventListener("wheel", handleWheel);
     };
-  }, [tiles]);
+  }, [tiles, ownedUnits, selectedUnit, turnState, planRouteTo]);
 
   useEffect(() => {
     if (!tiles.length || !layersRef.current) {
@@ -893,6 +1129,51 @@ export default function App() {
     await loadTurnState(nextTurn);
   };
 
+  const planRouteTo = useCallback((destination) => {
+    if (!selectedUnit) {
+      setOrderStatus("Select a unit to plan a route.");
+      setRoutePath([]);
+      return;
+    }
+    const tileIndex = tileIndexRef.current;
+    if (!tileIndex.size) {
+      setOrderStatus("Map tiles are not ready yet.");
+      setRoutePath([]);
+      return;
+    }
+    const blocked = new Set();
+    (turnState?.units || []).forEach((unit) => {
+      if (unit.id !== selectedUnit.id) {
+        blocked.add(`${unit.q},${unit.r}`);
+      }
+    });
+    const start = [selectedUnit.q, selectedUnit.r];
+    const goal = [destination.q, destination.r];
+    const path = findPath(tileIndex, start, goal, blocked);
+    if (!path) {
+      setOrderStatus("No route found to that destination.");
+      setRoutePath([]);
+      return;
+    }
+    setRoutePath(path);
+    const movePoints = selectedUnit.move_points ?? 3;
+    const destinations = buildOrdersFromPath(path, tileIndex, movePoints);
+    if (!destinations.length) {
+      setOrderStatus("Route is blocked or too costly for this unit.");
+      setPendingOrders([]);
+      return;
+    }
+    const orders = destinations.map((dest) => ({
+      type: "move",
+      unit_id: selectedUnit.id,
+      to: { q: dest.q, r: dest.r },
+    }));
+    setPendingOrders(orders);
+    setOrderStatus(
+      `Planned route ${path.length - 1} step(s) over ${orders.length} turn(s).`
+    );
+  }, [selectedUnit, turnState]);
+
   const handleAddOrder = () => {
     if (!selectedParticipantId) {
       setOrderStatus("Select a participant first.");
@@ -960,11 +1241,14 @@ export default function App() {
       setOrderStatus("Select a participant first.");
       return;
     }
-    if (!selectedUnitId) {
+    const pending = pendingOrders[0];
+    const unitId = pending?.unit_id ?? selectedUnitId;
+    const destination = pending?.to ?? selectedTile;
+    if (!unitId) {
       setOrderStatus("Select a unit to move.");
       return;
     }
-    if (!selectedTile) {
+    if (!destination) {
       setOrderStatus("Click a destination tile on the map.");
       return;
     }
@@ -975,14 +1259,14 @@ export default function App() {
         participant_id: selectedParticipantId,
         order: {
           type: "move",
-          unit_id: selectedUnitId,
-          to: { q: selectedTile.q, r: selectedTile.r },
+          unit_id: unitId,
+          to: { q: destination.q, r: destination.r },
         },
       });
       setOrderStatus(
         `Resolved turn ${response.turn}. Next turn ${response.next_turn}.`
       );
-      setPendingOrders([]);
+      setPendingOrders((prev) => (pending ? prev.slice(1) : prev));
       await loadAll(viewMode);
     } catch (error) {
       setOrderStatus(error.message || "Failed to submit order.");
@@ -1212,7 +1496,7 @@ export default function App() {
           </div>
           {orderStatus ? <div className="hint">{orderStatus}</div> : null}
           <div className="hint">
-            Tip: click a tile on the map to set the move destination.
+            Tip: click your unit, then a destination tile to plan a route.
           </div>
           <div className="panel-title">Overlays</div>
           <label className="toggle">

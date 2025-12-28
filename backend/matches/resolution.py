@@ -55,6 +55,7 @@ def build_turn_state(match, result=None):
             "owner_kingdom_id": unit.owner_kingdom_id,
             "q": unit.q,
             "r": unit.r,
+            "move_points": unit.unit_type.move_points,
             "hp": unit.hp,
             "status": unit.status,
         }
