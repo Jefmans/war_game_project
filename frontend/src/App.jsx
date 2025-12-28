@@ -24,6 +24,8 @@ const KINGDOM_COLORS = [
   0x8a7aa8,
   0xd1a15d,
 ];
+const TILE_STROKE = { width: 1, color: 0x1b232b, alpha: 0.6 };
+const UNIT_STROKE = { width: 2, color: 0x131d25, alpha: 0.7 };
 
 function axialToPixel(q, r, size) {
   const x = size * Math.sqrt(3) * (q + r / 2);
@@ -37,9 +39,10 @@ function drawHex(graphics, x, y, size, color) {
     const angle = (Math.PI / 180) * (60 * i - 30);
     points.push(x + size * Math.cos(angle), y + size * Math.sin(angle));
   }
-  graphics.beginFill(color);
-  graphics.drawPolygon(points);
-  graphics.endFill();
+  graphics
+    .poly(points)
+    .fill({ color })
+    .stroke(TILE_STROKE);
 }
 
 function colorForKingdom(id) {
@@ -140,7 +143,6 @@ export default function App() {
     const { tilesLayer, root } = layersRef.current;
     const positions = new Map();
     tilesLayer.clear();
-    tilesLayer.lineStyle(1, 0x1b232b, 0.6);
 
     let minX = Infinity;
     let maxX = -Infinity;
@@ -180,16 +182,16 @@ export default function App() {
     const positions = tilePositionsRef.current;
 
     unitsLayer.clear();
-    unitsLayer.lineStyle(2, 0x131d25, 0.7);
 
     (turnState.units || []).forEach((unit) => {
       const pos = positions.get(`${unit.q},${unit.r}`);
       if (!pos) {
         return;
       }
-      unitsLayer.beginFill(colorForKingdom(unit.owner_kingdom_id), 0.95);
-      unitsLayer.drawCircle(pos.x, pos.y, HEX_SIZE * 0.45);
-      unitsLayer.endFill();
+      unitsLayer
+        .circle(pos.x, pos.y, HEX_SIZE * 0.45)
+        .fill({ color: colorForKingdom(unit.owner_kingdom_id), alpha: 0.95 })
+        .stroke(UNIT_STROKE);
     });
   }, [turnState]);
 
