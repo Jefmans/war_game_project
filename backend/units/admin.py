@@ -11,5 +11,17 @@ class UnitTypeAdmin(admin.ModelAdmin):
 
 @admin.register(Unit)
 class UnitAdmin(admin.ModelAdmin):
-    list_display = ("id", "match", "owner_kingdom", "unit_type", "q", "r", "hp", "status")
+    list_display = (
+        "id",
+        "match_id",
+        "match",
+        "owner_kingdom_id",
+        "owner_kingdom",
+        "unit_type_id",
+        "unit_type",
+        "q",
+        "r",
+        "hp",
+        "status",
+    )
     list_filter = ("match", "owner_kingdom", "status")
