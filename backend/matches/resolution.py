@@ -28,7 +28,7 @@ def resolve_turn(turn):
 
     turn.status = Turn.STATUS_RESOLVED
     turn.resolved_at = timezone.now()
-    turn.state = _build_turn_state(match, result)
+    turn.state = build_turn_state(match, result)
     turn.save(update_fields=["status", "resolved_at", "state"])
 
     if match.last_resolved_turn < turn.number:
@@ -38,7 +38,9 @@ def resolve_turn(turn):
     return result
 
 
-def _build_turn_state(match, result):
+def build_turn_state(match, result=None):
+    if result is None:
+        result = {"status": "pending"}
     units = (
         Unit.objects.filter(match=match)
         .select_related("unit_type", "owner_kingdom")

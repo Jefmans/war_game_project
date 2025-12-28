@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework import status
 
 from matches.models import Kingdom, Match, MatchParticipant, Order
-from matches.resolution import resolve_turn
+from matches.resolution import build_turn_state, resolve_turn
 from matches.serializers import (
     CreateMatchSerializer,
     MaxTurnOverrideSerializer,
@@ -26,6 +26,7 @@ from matches.services import (
     get_participants,
     next_turn_for_index,
 )
+from units.models import Unit, UnitType
 from world.models import Chunk, Land, Province
 
 
@@ -201,15 +202,21 @@ def create_match(request):
             ]
             if chunk and kingdom_ids:
                 province_ids = []
+                province_to_tiles = {}
                 for cell in chunk.tiles.get("cells", []):
                     province_id = cell.get("province_id")
-                    if province_id is not None:
-                        province_ids.append(province_id)
+                    if province_id is None:
+                        continue
+                    province_ids.append(province_id)
+                    province_to_tiles.setdefault(province_id, []).append(
+                        (cell.get("q"), cell.get("r"))
+                    )
                 unique_provinces = list(dict.fromkeys(province_ids))
                 if len(unique_provinces) < len(kingdom_ids):
                     raise ValidationError(
                         {"participants": "not enough provinces for starter ownership"}
                     )
+                assignments = []
                 for kingdom_id, province_id in zip(kingdom_ids, unique_provinces):
                     starter_land = Land.objects.create(
                         match=match,
@@ -219,6 +226,34 @@ def create_match(request):
                         match=match,
                         id=province_id,
                     ).update(land=starter_land)
+                    assignments.append((kingdom_id, province_id))
+
+                unit_type, created = UnitType.objects.get_or_create(
+                    name="Infantry",
+                    defaults={
+                        "max_hp": 10,
+                        "attack": 1,
+                        "defense": 1,
+                        "move_points": 3,
+                    },
+                )
+                if not created and unit_type.move_points != 3:
+                    unit_type.move_points = 3
+                    unit_type.save(update_fields=["move_points"])
+
+                for kingdom_id, province_id in assignments:
+                    tiles = province_to_tiles.get(province_id) or []
+                    if not tiles:
+                        continue
+                    q, r = tiles[0]
+                    Unit.objects.create(
+                        match=match,
+                        owner_kingdom_id=kingdom_id,
+                        unit_type=unit_type,
+                        q=q,
+                        r=r,
+                        hp=unit_type.max_hp,
+                    )
 
         chunk_payload = None
         if create_chunk and chunk:
@@ -368,11 +403,17 @@ def queue_orders(request, match_id):
 @api_view(["GET"])
 def turn_state(request, match_id, turn_number):
     match = get_object_or_404(Match, id=match_id)
-    turn = get_object_or_404(match.turns, number=turn_number)
+    active_participant = get_active_participant(match, turn_number)
+    turn = ensure_turn(match, turn_number, active_participant)
     if turn.status != turn.STATUS_RESOLVED:
         return Response(
-            {"detail": "turn not resolved"},
-            status=status.HTTP_409_CONFLICT,
+            {
+                "match_id": match.id,
+                "turn": turn.number,
+                "status": turn.status,
+                "resolved_at": turn.resolved_at,
+                "state": build_turn_state(match),
+            }
         )
 
     return Response(
