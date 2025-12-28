@@ -24,6 +24,7 @@ const KINGDOM_COLORS = [
   0x8a7aa8,
   0xd1a15d,
 ];
+const PLAYER_TILE_COLORS = [0x3b82f6, 0xef4444];
 const TILE_STROKE = { width: 1, color: 0x1b232b, alpha: 0.6 };
 const UNIT_STROKE = { width: 2, color: 0x131d25, alpha: 0.7 };
 const LAND_STROKE = { width: 3.5, color: 0x2f2522, alpha: 0.85 };
@@ -92,6 +93,8 @@ export default function App() {
   const [turnLength, setTurnLength] = useState(null);
   const [tiles, setTiles] = useState([]);
   const [provinceToLand, setProvinceToLand] = useState({});
+  const [landToKingdom, setLandToKingdom] = useState({});
+  const [kingdomColorMap, setKingdomColorMap] = useState({});
   const [turnState, setTurnState] = useState(null);
   const [showProvinceBorders, setShowProvinceBorders] = useState(true);
   const [showLandBorders, setShowLandBorders] = useState(true);
@@ -206,10 +209,24 @@ export default function App() {
     tilePositionsRef.current = positions;
 
     const provinceToLandMap = provinceToLand || {};
+    const landToKingdomMap = landToKingdom || {};
+    const tileColorMap = kingdomColorMap || {};
 
     tiles.forEach((cell) => {
       const pos = positions.get(`${cell.q},${cell.r}`);
-      const color = TERRAIN_COLORS[cell.terrain] || TERRAIN_COLORS.plains;
+      const provinceId = cell.province_id ?? null;
+      const landId =
+        provinceId !== null
+          ? provinceToLandMap[String(provinceId)] ?? null
+          : null;
+      const kingdomId =
+        landId !== null ? landToKingdomMap[String(landId)] ?? null : null;
+      const ownerColor =
+        kingdomId !== null
+          ? tileColorMap[String(kingdomId)] ?? null
+          : null;
+      const color =
+        ownerColor ?? TERRAIN_COLORS[cell.terrain] ?? TERRAIN_COLORS.plains;
       drawHex(tilesLayer, pos.x, pos.y, HEX_SIZE, color);
     });
 
@@ -304,7 +321,14 @@ export default function App() {
     const offsetX = width / 2 - (minX + maxX) / 2;
     const offsetY = height / 2 - (minY + maxY) / 2;
     root.position.set(offsetX, offsetY);
-  }, [tiles, provinceToLand, showLandBorders, showProvinceBorders]);
+  }, [
+    tiles,
+    provinceToLand,
+    landToKingdom,
+    kingdomColorMap,
+    showLandBorders,
+    showProvinceBorders,
+  ]);
 
   useEffect(() => {
     if (!turnState || !layersRef.current) {
@@ -348,6 +372,16 @@ export default function App() {
       setLastResolved(resolved);
       setActiveParticipant(matchState.current_turn.active_participant_id);
       setTurnLength(matchState.match.turn_length_seconds);
+      const nextKingdomColorMap = {};
+      (matchState.participants || [])
+        .slice(0, PLAYER_TILE_COLORS.length)
+        .forEach((participant, index) => {
+          if (participant.kingdom_id) {
+            nextKingdomColorMap[String(participant.kingdom_id)] =
+              PLAYER_TILE_COLORS[index];
+          }
+        });
+      setKingdomColorMap(nextKingdomColorMap);
 
       const nextTurn = Math.min(turnNumber, resolved);
       setTurnNumber(nextTurn);
@@ -355,6 +389,7 @@ export default function App() {
       const chunk = await getChunk(matchId, chunkQ, chunkR);
       setTiles(chunk.tiles?.cells || []);
       setProvinceToLand(chunk.province_to_land || {});
+      setLandToKingdom(chunk.land_to_kingdom || {});
 
       await loadTurnState(nextTurn);
     } catch (error) {
