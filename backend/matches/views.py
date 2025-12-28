@@ -3,7 +3,7 @@ from django.core.management import call_command
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiExample, extend_schema
 from rest_framework.decorators import api_view
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
@@ -29,7 +29,34 @@ from matches.services import (
 from world.models import Chunk, Land, Province
 
 
-@extend_schema(request=CreateMatchSerializer)
+@extend_schema(
+    request=CreateMatchSerializer,
+    examples=[
+        OpenApiExample(
+            "Create match defaults",
+            value={
+                "name": "New Match",
+                "max_players": 2,
+                "turn_length_seconds": 10800,
+                "start_now": True,
+                "chunk_size": 32,
+                "participants": [
+                    {
+                        "username": "participant1",
+                        "seat_order": 1,
+                        "kingdom_name": "kingdom1",
+                    },
+                    {
+                        "username": "participant2",
+                        "seat_order": 2,
+                        "kingdom_name": "kingdom2",
+                    },
+                ],
+            },
+            request_only=True,
+        )
+    ],
+)
 @api_view(["POST"])
 def create_match(request):
     serializer = CreateMatchSerializer(data=request.data)
