@@ -14,6 +14,9 @@ const ICON_BG_ALPHA = 0.35;
 const ICON_BG_RADIUS = 0.65;
 const TOWN_NEUTRAL_COLOR = 0xcbd5e1;
 const UNIT_NEUTRAL_COLOR = 0xd1d5db;
+const OWNED_TILE_ALPHA = 0.35;
+const OWNED_BORDER_WIDTH = 2.6;
+const OWNED_BORDER_ALPHA = 1;
 
 const TERRAIN_COLORS = {
   plains: 0x5b8f64,
@@ -60,16 +63,28 @@ function axialToPixel(q, r, size) {
   return { x, y };
 }
 
-function drawHex(graphics, x, y, size, color) {
+function hexPoints(x, y, size) {
   const points = [];
   for (let i = 0; i < 6; i += 1) {
     const angle = (Math.PI / 180) * (60 * i - 30);
     points.push(x + size * Math.cos(angle), y + size * Math.sin(angle));
   }
+  return points;
+}
+
+function drawHex(graphics, x, y, size, color, alpha = 1) {
+  const points = hexPoints(x, y, size);
   graphics
     .poly(points)
-    .fill({ color })
+    .fill({ color, alpha })
     .stroke(TILE_STROKE);
+}
+
+function drawHexOutline(graphics, x, y, size, color) {
+  const points = hexPoints(x, y, size);
+  graphics
+    .poly(points)
+    .stroke({ width: OWNED_BORDER_WIDTH, color, alpha: OWNED_BORDER_ALPHA });
 }
 
 function hexCorners(x, y, size) {
@@ -209,6 +224,7 @@ export default function App() {
       const tilesLayer = new PIXI.Graphics();
       const landBordersLayer = new PIXI.Graphics();
       const provinceBordersLayer = new PIXI.Graphics();
+      const ownershipBordersLayer = new PIXI.Graphics();
       const townLayer = new PIXI.Container();
       const unitFallbackLayer = new PIXI.Graphics();
       const unitIconsLayer = new PIXI.Container();
@@ -216,6 +232,7 @@ export default function App() {
       root.addChild(tilesLayer);
       root.addChild(landBordersLayer);
       root.addChild(provinceBordersLayer);
+      root.addChild(ownershipBordersLayer);
       root.addChild(townLayer);
       root.addChild(unitFallbackLayer);
       root.addChild(unitIconsLayer);
@@ -226,6 +243,7 @@ export default function App() {
         tilesLayer,
         landBordersLayer,
         provinceBordersLayer,
+        ownershipBordersLayer,
         townLayer,
         unitFallbackLayer,
         unitIconsLayer,
@@ -248,13 +266,14 @@ export default function App() {
       return;
     }
 
-    const { tilesLayer, landBordersLayer, provinceBordersLayer, root } =
+    const { tilesLayer, landBordersLayer, provinceBordersLayer, ownershipBordersLayer, root } =
       layersRef.current;
     const positions = new Map();
     const tileIndex = new Map();
     tilesLayer.clear();
     landBordersLayer.clear();
     provinceBordersLayer.clear();
+    ownershipBordersLayer.clear();
 
     let minX = Infinity;
     let maxX = -Infinity;
@@ -291,9 +310,20 @@ export default function App() {
         kingdomId !== null
           ? tileColorMap[String(kingdomId)] ?? null
           : null;
+      const isOwned = ownerColor !== null && ownerColor !== undefined;
       const color =
         ownerColor ?? TERRAIN_COLORS[cell.terrain] ?? TERRAIN_COLORS.plains;
-      drawHex(tilesLayer, pos.x, pos.y, HEX_SIZE, color);
+      const fillAlpha = isOwned ? OWNED_TILE_ALPHA : 1;
+      drawHex(tilesLayer, pos.x, pos.y, HEX_SIZE, color, fillAlpha);
+      if (isOwned) {
+        drawHexOutline(
+          ownershipBordersLayer,
+          pos.x,
+          pos.y,
+          HEX_SIZE,
+          ownerColor
+        );
+      }
     });
 
     if (showLandBorders) {
