@@ -26,7 +26,15 @@ class KingdomAdmin(admin.ModelAdmin):
 
 @admin.register(MatchParticipant)
 class MatchParticipantAdmin(admin.ModelAdmin):
-    list_display = ("id", "match", "user", "seat_order", "kingdom", "is_active")
+    list_display = (
+        "id",
+        "match",
+        "user_id",
+        "user",
+        "seat_order",
+        "kingdom",
+        "is_active",
+    )
     list_filter = ("match", "kingdom", "is_active")
 
 
