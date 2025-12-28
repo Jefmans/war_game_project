@@ -9,13 +9,22 @@ def get_max_turn(match, now=None, persist=False):
         if persist:
             match.start_time = now
             match.save(update_fields=["start_time"])
-        return 1
+        base_max = 1
+        return _apply_max_turn_override(match, base_max)
 
     elapsed = (now - match.start_time).total_seconds()
     if elapsed < 0:
-        return 1
+        base_max = 1
+        return _apply_max_turn_override(match, base_max)
 
-    return int(elapsed // match.turn_length_seconds) + 1
+    base_max = int(elapsed // match.turn_length_seconds) + 1
+    return _apply_max_turn_override(match, base_max)
+
+
+def _apply_max_turn_override(match, base_max):
+    if match.max_turn_override is None:
+        return base_max
+    return max(base_max, match.max_turn_override)
 
 
 def get_participants(match):

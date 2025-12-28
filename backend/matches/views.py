@@ -8,7 +8,7 @@ from rest_framework import status
 from matches.models import Match, MatchParticipant, Order
 from matches.resolution import resolve_turn
 from matches.services import get_active_participant, get_current_turn, get_max_turn
-from matches.serializers import SubmitOrderSerializer
+from matches.serializers import MaxTurnOverrideSerializer, SubmitOrderSerializer
 from world.models import Chunk
 
 
@@ -35,6 +35,7 @@ def match_state(request, match_id):
                 "turn_length_seconds": match.turn_length_seconds,
                 "start_time": match.start_time,
                 "last_resolved_turn": match.last_resolved_turn,
+                "max_turn_override": match.max_turn_override,
             },
             "current_turn": {
                 "number": current_turn_number,
@@ -42,6 +43,26 @@ def match_state(request, match_id):
             },
             "max_turn": max_turn,
             "participants": participants,
+        }
+    )
+
+
+@extend_schema(request=MaxTurnOverrideSerializer)
+@api_view(["POST"])
+def set_max_turn_override(request, match_id):
+    match = get_object_or_404(Match, id=match_id)
+    serializer = MaxTurnOverrideSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    match.max_turn_override = serializer.validated_data.get("max_turn")
+    match.save(update_fields=["max_turn_override"])
+
+    effective_max_turn = get_max_turn(match, now=timezone.now(), persist=False)
+    return Response(
+        {
+            "match_id": match.id,
+            "max_turn_override": match.max_turn_override,
+            "max_turn": effective_max_turn,
         }
     )
 

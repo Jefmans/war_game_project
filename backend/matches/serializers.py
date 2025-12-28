@@ -26,3 +26,7 @@ class OrderPayloadSerializer(serializers.Serializer):
 class SubmitOrderSerializer(serializers.Serializer):
     participant_id = serializers.IntegerField()
     order = OrderPayloadSerializer()
+
+
+class MaxTurnOverrideSerializer(serializers.Serializer):
+    max_turn = serializers.IntegerField(min_value=1, allow_null=True)

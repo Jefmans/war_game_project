@@ -9,6 +9,10 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
     path("api/matches/<int:match_id>/state/", match_views.match_state),
+    path(
+        "api/matches/<int:match_id>/max-turn/",
+        match_views.set_max_turn_override,
+    ),
     path("api/matches/<int:match_id>/orders/", match_views.submit_order),
     path(
         "api/matches/<int:match_id>/chunks/<int:chunk_q>/<int:chunk_r>/",

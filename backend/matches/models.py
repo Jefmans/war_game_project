@@ -18,6 +18,7 @@ class Match(models.Model):
     turn_length_seconds = models.PositiveIntegerField(default=10800)
     start_time = models.DateTimeField(null=True, blank=True)
     last_resolved_turn = models.PositiveIntegerField(default=0)
+    max_turn_override = models.PositiveIntegerField(null=True, blank=True)
     world_seed = models.BigIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

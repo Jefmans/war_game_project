@@ -12,6 +12,7 @@ class MatchAdmin(admin.ModelAdmin):
         "max_players",
         "turn_length_seconds",
         "start_time",
+        "max_turn_override",
     )
     list_filter = ("status",)
     search_fields = ("name",)
