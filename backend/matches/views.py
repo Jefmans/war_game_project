@@ -27,7 +27,7 @@ from matches.services import (
     next_turn_for_index,
 )
 from units.models import Unit, UnitType
-from world.models import Chunk, Land, Province
+from world.models import Chunk, Land, Province, Town
 
 
 @extend_schema(
@@ -539,6 +539,24 @@ def chunk_detail(request, match_id, chunk_q, chunk_r):
     if land_ids:
         for land in Land.objects.filter(id__in=land_ids).values("id", "kingdom_id"):
             land_to_kingdom[str(land["id"])] = land["kingdom_id"]
+    towns = []
+    if province_ids:
+        for town in Town.objects.filter(
+            match_id=chunk.match_id, province_id__in=province_ids
+        ).values("province_id", "q", "r"):
+            province_id = town["province_id"]
+            land_id = province_to_land.get(str(province_id))
+            kingdom_id = (
+                land_to_kingdom.get(str(land_id)) if land_id is not None else None
+            )
+            towns.append(
+                {
+                    "province_id": province_id,
+                    "q": town["q"],
+                    "r": town["r"],
+                    "kingdom_id": kingdom_id,
+                }
+            )
     return Response(
         {
             "match_id": chunk.match_id,
@@ -549,5 +567,6 @@ def chunk_detail(request, match_id, chunk_q, chunk_r):
             "meta": chunk.meta,
             "province_to_land": province_to_land,
             "land_to_kingdom": land_to_kingdom,
+            "towns": towns,
         }
     )

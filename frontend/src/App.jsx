@@ -10,6 +10,8 @@ const DEFAULT_CHUNK_R = Number(import.meta.env.VITE_CHUNK_R || 0);
 const HEX_SIZE = 12;
 const UNIT_ICON_SIZE = HEX_SIZE * 1.2;
 const CASTLE_ICON_SIZE = HEX_SIZE * 1.5;
+const TOWN_NEUTRAL_COLOR = 0xcbd5e1;
+const UNIT_NEUTRAL_COLOR = 0xd1d5db;
 
 const TERRAIN_COLORS = {
   plains: 0x5b8f64,
@@ -98,6 +100,7 @@ export default function App() {
   const [tiles, setTiles] = useState([]);
   const [provinceToLand, setProvinceToLand] = useState({});
   const [landToKingdom, setLandToKingdom] = useState({});
+  const [towns, setTowns] = useState([]);
   const [kingdomColorMap, setKingdomColorMap] = useState({});
   const [turnState, setTurnState] = useState(null);
   const [showProvinceBorders, setShowProvinceBorders] = useState(true);
@@ -183,14 +186,14 @@ export default function App() {
       const tilesLayer = new PIXI.Graphics();
       const landBordersLayer = new PIXI.Graphics();
       const provinceBordersLayer = new PIXI.Graphics();
-      const castleLayer = new PIXI.Container();
+      const townLayer = new PIXI.Container();
       const unitFallbackLayer = new PIXI.Graphics();
       const unitIconsLayer = new PIXI.Container();
 
       root.addChild(tilesLayer);
       root.addChild(landBordersLayer);
       root.addChild(provinceBordersLayer);
-      root.addChild(castleLayer);
+      root.addChild(townLayer);
       root.addChild(unitFallbackLayer);
       root.addChild(unitIconsLayer);
       app.stage.addChild(root);
@@ -200,7 +203,7 @@ export default function App() {
         tilesLayer,
         landBordersLayer,
         provinceBordersLayer,
-        castleLayer,
+        townLayer,
         unitFallbackLayer,
         unitIconsLayer,
       };
@@ -375,46 +378,34 @@ export default function App() {
       return;
     }
 
-    const { castleLayer } = layersRef.current;
+    const { townLayer } = layersRef.current;
     const positions = tilePositionsRef.current;
 
-    castleLayer.removeChildren();
+    townLayer.removeChildren();
 
     if (!iconTextures?.castle) {
       return;
     }
 
-    const provinceToLandMap = provinceToLand || {};
-    const landToKingdomMap = landToKingdom || {};
-    const seenProvinces = new Set();
-
-    tiles.forEach((cell) => {
-      const provinceId = cell.province_id ?? null;
-      if (provinceId === null || seenProvinces.has(provinceId)) {
-        return;
-      }
-      seenProvinces.add(provinceId);
-      const landId = provinceToLandMap[String(provinceId)] ?? null;
-      const kingdomId =
-        landId !== null ? landToKingdomMap[String(landId)] ?? null : null;
-      if (kingdomId === null) {
-        return;
-      }
-      const pos = positions.get(`${cell.q},${cell.r}`);
+    (towns || []).forEach((town) => {
+      const pos = positions.get(`${town.q},${town.r}`);
       if (!pos) {
         return;
       }
+      const tint =
+        town.kingdom_id !== null && town.kingdom_id !== undefined
+          ? kingdomColorMap[String(town.kingdom_id)] ?? TOWN_NEUTRAL_COLOR
+          : TOWN_NEUTRAL_COLOR;
       const sprite = new PIXI.Sprite(iconTextures.castle);
       sprite.anchor.set(0.5);
       sprite.width = CASTLE_ICON_SIZE;
       sprite.height = CASTLE_ICON_SIZE;
-      sprite.tint =
-        kingdomColorMap[String(kingdomId)] ?? colorForKingdom(kingdomId);
+      sprite.tint = tint;
       sprite.alpha = 0.95;
       sprite.position.set(pos.x, pos.y);
-      castleLayer.addChild(sprite);
+      townLayer.addChild(sprite);
     });
-  }, [tiles, provinceToLand, landToKingdom, kingdomColorMap, iconTextures]);
+  }, [tiles, towns, kingdomColorMap, iconTextures]);
 
   useEffect(() => {
     if (!turnState || !layersRef.current) {
@@ -435,8 +426,7 @@ export default function App() {
         return;
       }
       const tint =
-        kingdomColorMap[String(unit.owner_kingdom_id)] ??
-        colorForKingdom(unit.owner_kingdom_id);
+        kingdomColorMap[String(unit.owner_kingdom_id)] ?? UNIT_NEUTRAL_COLOR;
 
       if (infantryTexture) {
         const sprite = new PIXI.Sprite(infantryTexture);
@@ -494,6 +484,7 @@ export default function App() {
       setTiles(chunk.tiles?.cells || []);
       setProvinceToLand(chunk.province_to_land || {});
       setLandToKingdom(chunk.land_to_kingdom || {});
+      setTowns(chunk.towns || []);
 
       await loadTurnState(nextTurn);
     } catch (error) {

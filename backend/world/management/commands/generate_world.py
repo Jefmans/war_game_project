@@ -5,7 +5,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from matches.models import Kingdom, Match
-from world.models import Chunk, Land, Province
+from world.models import Chunk, Land, Province, Town
 
 NEIGHBOR_OFFSETS = (
     (1, 0),
@@ -207,6 +207,7 @@ class Command(BaseCommand):
 
         unassigned = set(tiles)
         tile_to_province = {}
+        province_to_tiles = {}
         province_ids = []
 
         while unassigned:
@@ -219,6 +220,11 @@ class Command(BaseCommand):
             province_ids.append(province.id)
             for tile in group:
                 tile_to_province[tile] = province.id
+                province_to_tiles.setdefault(province.id, []).append(tile)
+
+        for province_id, tiles in province_to_tiles.items():
+            q, r = rng.choice(tiles)
+            Town.objects.create(match=match, province_id=province_id, q=q, r=r)
 
         province_adjacency = _build_tile_adjacency(tile_to_province)
         province_groups = _group_graph(

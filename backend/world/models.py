@@ -53,3 +53,27 @@ class Chunk(models.Model):
 
     def __str__(self):
         return f"Chunk {self.chunk_q},{self.chunk_r}"
+
+
+class Town(models.Model):
+    match = models.ForeignKey("matches.Match", on_delete=models.CASCADE, related_name="towns")
+    province = models.OneToOneField(
+        Province,
+        on_delete=models.CASCADE,
+        related_name="town",
+    )
+    q = models.IntegerField()
+    r = models.IntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["match", "q", "r"])]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["match", "q", "r"],
+                name="unique_match_town_tile",
+            )
+        ]
+
+    def __str__(self):
+        return f"Town {self.province_id} ({self.q},{self.r})"

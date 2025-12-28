@@ -5,6 +5,7 @@ from units.models import Unit
 from world.pathfinding import find_path
 from world.terrain import movement_cost
 from world.tiles import TileCache
+from world.models import Land, Town
 
 
 def resolve_turn(turn):
@@ -106,9 +107,11 @@ def _resolve_move(match, payload):
         spent += step_cost
         new_pos = step
 
+    capture = None
     if new_pos != start:
         unit.q, unit.r = new_pos
         unit.save(update_fields=["q", "r", "updated_at"])
+        capture = _capture_town(match, unit, new_pos)
 
     return {
         "status": "moved" if new_pos != start else "stayed",
@@ -116,4 +119,37 @@ def _resolve_move(match, payload):
         "from": {"q": start[0], "r": start[1]},
         "to": {"q": new_pos[0], "r": new_pos[1]},
         "spent": spent,
+        "capture": capture,
+    }
+
+
+def _capture_town(match, unit, position):
+    town = (
+        Town.objects.select_related("province__land")
+        .filter(match=match, q=position[0], r=position[1])
+        .first()
+    )
+    if not town:
+        return None
+
+    province = town.province
+    current_land = province.land
+    if current_land and current_land.kingdom_id == unit.owner_kingdom_id:
+        return {"status": "already_owned", "province_id": province.id}
+
+    land = (
+        Land.objects.filter(match=match, kingdom_id=unit.owner_kingdom_id)
+        .order_by("id")
+        .first()
+    )
+    if not land:
+        land = Land.objects.create(match=match, kingdom_id=unit.owner_kingdom_id)
+
+    province.land = land
+    province.save(update_fields=["land"])
+
+    return {
+        "status": "captured",
+        "province_id": province.id,
+        "kingdom_id": unit.owner_kingdom_id,
     }
