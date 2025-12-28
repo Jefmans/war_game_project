@@ -99,6 +99,19 @@ body {
   font-size: 14px;
 }
 
+.controls .toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+.controls .toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+
 .field-row {
   display: grid;
   grid-template-columns: 1fr 1fr;

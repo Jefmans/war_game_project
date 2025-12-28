@@ -93,6 +93,8 @@ export default function App() {
   const [tiles, setTiles] = useState([]);
   const [provinceToLand, setProvinceToLand] = useState({});
   const [turnState, setTurnState] = useState(null);
+  const [showProvinceBorders, setShowProvinceBorders] = useState(true);
+  const [showLandBorders, setShowLandBorders] = useState(true);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -211,94 +213,98 @@ export default function App() {
       drawHex(tilesLayer, pos.x, pos.y, HEX_SIZE, color);
     });
 
-    tiles.forEach((cell) => {
-      const key = `${cell.q},${cell.r}`;
-      const pos = positions.get(key);
-      if (!pos) {
-        return;
-      }
-      const corners = hexCorners(pos.x, pos.y, HEX_SIZE);
-      const currentProvince = cell.province_id ?? null;
-      const currentLand =
-        currentProvince !== null
-          ? provinceToLandMap[String(currentProvince)] ?? null
-          : null;
-
-      NEIGHBOR_OFFSETS.forEach(([dq, dr], index) => {
-        const neighborKey = `${cell.q + dq},${cell.r + dr}`;
-        const neighbor = tileIndex.get(neighborKey);
-        const neighborProvince = neighbor?.province_id ?? null;
-        const neighborLand =
-          neighborProvince !== null
-            ? provinceToLandMap[String(neighborProvince)] ?? null
+    if (showLandBorders) {
+      tiles.forEach((cell) => {
+        const key = `${cell.q},${cell.r}`;
+        const pos = positions.get(key);
+        if (!pos) {
+          return;
+        }
+        const corners = hexCorners(pos.x, pos.y, HEX_SIZE);
+        const currentProvince = cell.province_id ?? null;
+        const currentLand =
+          currentProvince !== null
+            ? provinceToLandMap[String(currentProvince)] ?? null
             : null;
 
-        if (neighbor && neighborLand === currentLand) {
-          return;
-        }
+        NEIGHBOR_OFFSETS.forEach(([dq, dr], index) => {
+          const neighborKey = `${cell.q + dq},${cell.r + dr}`;
+          const neighbor = tileIndex.get(neighborKey);
+          const neighborProvince = neighbor?.province_id ?? null;
+          const neighborLand =
+            neighborProvince !== null
+              ? provinceToLandMap[String(neighborProvince)] ?? null
+              : null;
 
-        if (
-          neighbor &&
-          neighborLand !== null &&
-          currentLand !== null &&
-          currentLand > neighborLand
-        ) {
-          return;
-        }
+          if (neighbor && neighborLand === currentLand) {
+            return;
+          }
 
-        const [cornerA, cornerB] = EDGE_CORNER_INDEX[index];
-        const start = corners[cornerA];
-        const end = corners[cornerB];
-        landBordersLayer
-          .moveTo(start.x, start.y)
-          .lineTo(end.x, end.y)
-          .stroke(LAND_STROKE);
+          if (
+            neighbor &&
+            neighborLand !== null &&
+            currentLand !== null &&
+            currentLand > neighborLand
+          ) {
+            return;
+          }
+
+          const [cornerA, cornerB] = EDGE_CORNER_INDEX[index];
+          const start = corners[cornerA];
+          const end = corners[cornerB];
+          landBordersLayer
+            .moveTo(start.x, start.y)
+            .lineTo(end.x, end.y)
+            .stroke(LAND_STROKE);
+        });
       });
-    });
+    }
 
-    tiles.forEach((cell) => {
-      const key = `${cell.q},${cell.r}`;
-      const pos = positions.get(key);
-      if (!pos) {
-        return;
-      }
-      const corners = hexCorners(pos.x, pos.y, HEX_SIZE);
-      const currentProvince = cell.province_id ?? null;
-
-      NEIGHBOR_OFFSETS.forEach(([dq, dr], index) => {
-        const neighborKey = `${cell.q + dq},${cell.r + dr}`;
-        const neighbor = tileIndex.get(neighborKey);
-        const neighborProvince = neighbor?.province_id ?? null;
-
-        if (neighbor && neighborProvince === currentProvince) {
+    if (showProvinceBorders) {
+      tiles.forEach((cell) => {
+        const key = `${cell.q},${cell.r}`;
+        const pos = positions.get(key);
+        if (!pos) {
           return;
         }
+        const corners = hexCorners(pos.x, pos.y, HEX_SIZE);
+        const currentProvince = cell.province_id ?? null;
 
-        if (
-          neighbor &&
-          neighborProvince !== null &&
-          currentProvince !== null &&
-          currentProvince > neighborProvince
-        ) {
-          return;
-        }
+        NEIGHBOR_OFFSETS.forEach(([dq, dr], index) => {
+          const neighborKey = `${cell.q + dq},${cell.r + dr}`;
+          const neighbor = tileIndex.get(neighborKey);
+          const neighborProvince = neighbor?.province_id ?? null;
 
-        const [cornerA, cornerB] = EDGE_CORNER_INDEX[index];
-        const start = corners[cornerA];
-        const end = corners[cornerB];
-        provinceBordersLayer
-          .moveTo(start.x, start.y)
-          .lineTo(end.x, end.y)
-          .stroke(PROVINCE_STROKE);
+          if (neighbor && neighborProvince === currentProvince) {
+            return;
+          }
+
+          if (
+            neighbor &&
+            neighborProvince !== null &&
+            currentProvince !== null &&
+            currentProvince > neighborProvince
+          ) {
+            return;
+          }
+
+          const [cornerA, cornerB] = EDGE_CORNER_INDEX[index];
+          const start = corners[cornerA];
+          const end = corners[cornerB];
+          provinceBordersLayer
+            .moveTo(start.x, start.y)
+            .lineTo(end.x, end.y)
+            .stroke(PROVINCE_STROKE);
+        });
       });
-    });
+    }
 
     const width = appRef.current.renderer.width;
     const height = appRef.current.renderer.height;
     const offsetX = width / 2 - (minX + maxX) / 2;
     const offsetY = height / 2 - (minY + maxY) / 2;
     root.position.set(offsetX, offsetY);
-  }, [tiles, provinceToLand]);
+  }, [tiles, provinceToLand, showLandBorders, showProvinceBorders]);
 
   useEffect(() => {
     if (!turnState || !layersRef.current) {
@@ -443,6 +449,23 @@ export default function App() {
               Turn length: {turnLength ? `${turnLength}s` : "-"}
             </div>
           </div>
+          <div className="panel-title">Overlays</div>
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={showProvinceBorders}
+              onChange={(event) => setShowProvinceBorders(event.target.checked)}
+            />
+            Province borders
+          </label>
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={showLandBorders}
+              onChange={(event) => setShowLandBorders(event.target.checked)}
+            />
+            Land borders
+          </label>
           <div className="button-row">
             <button onClick={handlePrev} disabled={!canGoPrev}>
               Previous
