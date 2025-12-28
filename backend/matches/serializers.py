@@ -65,7 +65,12 @@ class CreateMatchSerializer(serializers.Serializer):
     start_time = serializers.DateTimeField(required=False, allow_null=True)
     start_now = serializers.BooleanField(required=False, default=False)
     world_seed = serializers.IntegerField(required=False, allow_null=True)
-    max_turn_override = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    max_turn_override = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        min_value=1,
+        default=100,
+    )
     create_chunk = serializers.BooleanField(required=False, default=True)
     chunk_q = serializers.IntegerField(required=False, default=0)
     chunk_r = serializers.IntegerField(required=False, default=0)

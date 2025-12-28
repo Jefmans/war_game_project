@@ -1,3 +1,5 @@
+import random
+
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.db import transaction
@@ -29,6 +31,15 @@ from matches.services import (
 from units.models import Unit, UnitType
 from world.models import Chunk, Land, Province, Town
 
+NEIGHBOR_OFFSETS = (
+    (1, 0),
+    (1, -1),
+    (0, -1),
+    (-1, 0),
+    (-1, 1),
+    (0, 1),
+)
+
 
 @extend_schema(
     request=CreateMatchSerializer,
@@ -40,6 +51,7 @@ from world.models import Chunk, Land, Province, Town
                 "max_players": 2,
                 "turn_length_seconds": 10800,
                 "start_now": True,
+                "max_turn_override": 100,
                 "chunk_size": 32,
                 "participants": [
                     {
@@ -241,12 +253,13 @@ def create_match(request):
                     unit_type.move_points = 3
                     unit_type.save(update_fields=["move_points"])
 
+                units_by_kingdom = {}
                 for kingdom_id, province_id in assignments:
                     tiles = province_to_tiles.get(province_id) or []
                     if not tiles:
                         continue
                     q, r = tiles[0]
-                    Unit.objects.create(
+                    unit = Unit.objects.create(
                         match=match,
                         owner_kingdom_id=kingdom_id,
                         unit_type=unit_type,
@@ -254,6 +267,57 @@ def create_match(request):
                         r=r,
                         hp=unit_type.max_hp,
                     )
+                    units_by_kingdom[kingdom_id] = unit
+
+                participants = get_participants(match)
+                count = len(participants)
+                if count and units_by_kingdom:
+                    tile_set = {
+                        (cell.get("q"), cell.get("r"))
+                        for cell in chunk.tiles.get("cells", [])
+                        if cell.get("q") is not None and cell.get("r") is not None
+                    }
+                    max_turn = get_max_turn(match, now=timezone.now(), persist=False)
+                    current_turn_number = match.last_resolved_turn + 1
+
+                    for index, participant in enumerate(participants):
+                        unit = units_by_kingdom.get(participant.kingdom_id)
+                        if not unit:
+                            continue
+                        next_turn = next_turn_for_index(
+                            current_turn_number, index, count
+                        )
+                        if next_turn is None:
+                            continue
+                        rng = random.Random((match.world_seed or 0) ^ unit.id)
+                        current_pos = (unit.q, unit.r)
+                        while next_turn <= max_turn:
+                            neighbors = [
+                                (current_pos[0] + dq, current_pos[1] + dr)
+                                for dq, dr in NEIGHBOR_OFFSETS
+                            ]
+                            valid_neighbors = [
+                                pos for pos in neighbors if pos in tile_set
+                            ]
+                            if valid_neighbors:
+                                destination = rng.choice(valid_neighbors)
+                            else:
+                                destination = current_pos
+
+                            payload = {
+                                "type": "move",
+                                "unit_id": unit.id,
+                                "to": {"q": destination[0], "r": destination[1]},
+                            }
+                            active_participant = participants[(next_turn - 1) % count]
+                            turn = ensure_turn(match, next_turn, active_participant)
+                            Order.objects.update_or_create(
+                                turn=turn,
+                                participant=participant,
+                                defaults={"payload": payload},
+                            )
+                            current_pos = destination
+                            next_turn += count
 
         chunk_payload = None
         if create_chunk and chunk:
