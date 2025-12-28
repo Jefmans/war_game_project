@@ -76,15 +76,36 @@ class CreateMatchSerializer(serializers.Serializer):
     land_max = serializers.IntegerField(required=False, default=24, min_value=1)
     kingdom_min = serializers.IntegerField(required=False, default=1, min_value=1)
     kingdom_max = serializers.IntegerField(required=False, default=4, min_value=1)
-    participants = ParticipantInputSerializer(many=True, required=False)
+    participants = ParticipantInputSerializer(
+        many=True,
+        required=False,
+        default=[
+            {
+                "username": "participant1",
+                "seat_order": 1,
+                "kingdom_name": "kingdom1",
+                "is_active": True,
+            },
+            {
+                "username": "participant2",
+                "seat_order": 2,
+                "kingdom_name": "kingdom2",
+                "is_active": True,
+            },
+        ],
+    )
 
     def validate(self, data):
         participants = data.get("participants", [])
-        max_players = data.get("max_players", 10)
+        max_players = data.get("max_players", 2)
+        provided_participants = "participants" in getattr(self, "initial_data", {})
         if len(participants) > max_players:
-            raise serializers.ValidationError(
-                {"participants": "participants cannot exceed max_players"}
-            )
+            if provided_participants:
+                raise serializers.ValidationError(
+                    {"participants": "participants cannot exceed max_players"}
+                )
+            data["participants"] = participants[:max_players]
+            participants = data["participants"]
         if data.get("create_chunk", True):
             if data.get("province_min", 1) > data.get("province_max", 1):
                 raise serializers.ValidationError(

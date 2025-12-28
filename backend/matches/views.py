@@ -172,6 +172,7 @@ def create_match(request):
                 }
             )
 
+        chunk = None
         if create_chunk:
             call_command(
                 "generate_world",
@@ -187,32 +188,46 @@ def create_match(request):
                 kingdom_max=chunk_options["kingdom_max"],
             )
             match.refresh_from_db(fields=["world_seed"])
-            kingdom_ids = [
-                payload["kingdom_id"]
-                for payload in participants_payload
-                if payload.get("kingdom_id")
-            ]
-            if kingdom_ids:
-                lands = list(Land.objects.filter(match=match).order_by("id"))
-                for index, land in enumerate(lands):
-                    land.kingdom_id = kingdom_ids[index % len(kingdom_ids)]
-                if lands:
-                    Land.objects.bulk_update(lands, ["kingdom"])
-
-        chunk_payload = None
-        if create_chunk:
+            Land.objects.filter(match=match).update(kingdom=None)
             chunk = Chunk.objects.filter(
                 match=match,
                 chunk_q=chunk_options["chunk_q"],
                 chunk_r=chunk_options["chunk_r"],
             ).first()
-            if chunk:
-                chunk_payload = {
-                    "id": chunk.id,
-                    "chunk_q": chunk.chunk_q,
-                    "chunk_r": chunk.chunk_r,
-                    "size": chunk.size,
-                }
+            kingdom_ids = [
+                payload["kingdom_id"]
+                for payload in participants_payload
+                if payload.get("kingdom_id")
+            ]
+            if chunk and kingdom_ids:
+                province_ids = []
+                for cell in chunk.tiles.get("cells", []):
+                    province_id = cell.get("province_id")
+                    if province_id is not None:
+                        province_ids.append(province_id)
+                unique_provinces = list(dict.fromkeys(province_ids))
+                if len(unique_provinces) < len(kingdom_ids):
+                    raise ValidationError(
+                        {"participants": "not enough provinces for starter ownership"}
+                    )
+                for kingdom_id, province_id in zip(kingdom_ids, unique_provinces):
+                    starter_land = Land.objects.create(
+                        match=match,
+                        kingdom_id=kingdom_id,
+                    )
+                    Province.objects.filter(
+                        match=match,
+                        id=province_id,
+                    ).update(land=starter_land)
+
+        chunk_payload = None
+        if create_chunk and chunk:
+            chunk_payload = {
+                "id": chunk.id,
+                "chunk_q": chunk.chunk_q,
+                "chunk_r": chunk.chunk_r,
+                "size": chunk.size,
+            }
 
     return Response(
         {
