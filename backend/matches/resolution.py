@@ -28,13 +28,39 @@ def resolve_turn(turn):
 
     turn.status = Turn.STATUS_RESOLVED
     turn.resolved_at = timezone.now()
-    turn.save(update_fields=["status", "resolved_at"])
+    turn.state = _build_turn_state(match, result)
+    turn.save(update_fields=["status", "resolved_at", "state"])
 
     if match.last_resolved_turn < turn.number:
         match.last_resolved_turn = turn.number
         match.save(update_fields=["last_resolved_turn"])
 
     return result
+
+
+def _build_turn_state(match, result):
+    units = (
+        Unit.objects.filter(match=match)
+        .select_related("unit_type", "owner_kingdom")
+        .order_by("id")
+    )
+    unit_payload = [
+        {
+            "id": unit.id,
+            "type": unit.unit_type.name,
+            "owner_kingdom_id": unit.owner_kingdom_id,
+            "q": unit.q,
+            "r": unit.r,
+            "hp": unit.hp,
+            "status": unit.status,
+        }
+        for unit in units
+    ]
+    return {
+        "generated_at": timezone.now().isoformat(),
+        "units": unit_payload,
+        "result": result,
+    }
 
 
 def _resolve_move(match, payload):

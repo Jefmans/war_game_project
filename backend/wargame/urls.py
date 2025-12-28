@@ -17,6 +17,10 @@ urlpatterns = [
         "api/matches/<int:match_id>/queue-orders/",
         match_views.queue_orders,
     ),
+    path(
+        "api/matches/<int:match_id>/turns/<int:turn_number>/state/",
+        match_views.turn_state,
+    ),
     path("api/matches/<int:match_id>/orders/", match_views.submit_order),
     path(
         "api/matches/<int:match_id>/chunks/<int:chunk_q>/<int:chunk_r>/",

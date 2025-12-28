@@ -140,6 +140,27 @@ def queue_orders(request, match_id):
     )
 
 
+@api_view(["GET"])
+def turn_state(request, match_id, turn_number):
+    match = get_object_or_404(Match, id=match_id)
+    turn = get_object_or_404(match.turns, number=turn_number)
+    if turn.status != turn.STATUS_RESOLVED:
+        return Response(
+            {"detail": "turn not resolved"},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    return Response(
+        {
+            "match_id": match.id,
+            "turn": turn.number,
+            "status": turn.status,
+            "resolved_at": turn.resolved_at,
+            "state": turn.state or {},
+        }
+    )
+
+
 @extend_schema(request=SubmitOrderSerializer)
 @api_view(["POST"])
 def submit_order(request, match_id):
