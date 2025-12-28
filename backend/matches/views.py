@@ -1,5 +1,6 @@
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from drf_spectacular.utils import extend_schema
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
@@ -7,6 +8,7 @@ from rest_framework import status
 from matches.models import Match, MatchParticipant, Order
 from matches.resolution import resolve_turn
 from matches.services import get_active_participant, get_current_turn, get_max_turn
+from matches.serializers import SubmitOrderSerializer
 from world.models import Chunk
 
 
@@ -44,18 +46,14 @@ def match_state(request, match_id):
     )
 
 
+@extend_schema(request=SubmitOrderSerializer)
 @api_view(["POST"])
 def submit_order(request, match_id):
     match = get_object_or_404(Match, id=match_id)
-    data = request.data or {}
-    participant_id = data.get("participant_id")
-    payload = data.get("order") or {}
-
-    if participant_id is None:
-        return Response(
-            {"detail": "participant_id is required"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+    serializer = SubmitOrderSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    participant_id = serializer.validated_data["participant_id"]
+    payload = serializer.validated_data["order"]
 
     participant = get_object_or_404(
         MatchParticipant, match=match, id=participant_id, is_active=True
