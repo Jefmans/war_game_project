@@ -58,7 +58,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 "indexes": [
-                    models.Index(fields=["match", "q", "r"]),
+                    models.Index(fields=["match", "q", "r"], name="units_match_q_r_idx"),
                 ],
             },
         ),

@@ -89,7 +89,10 @@ class Migration(migrations.Migration):
                     )
                 ],
                 "indexes": [
-                    models.Index(fields=["match", "chunk_q", "chunk_r"]),
+                    models.Index(
+                        fields=["match", "chunk_q", "chunk_r"],
+                        name="world_chunk_match_idx",
+                    ),
                 ],
             },
         ),
@@ -119,7 +122,10 @@ class Migration(migrations.Migration):
             ],
             options={
                 "indexes": [
-                    models.Index(fields=["match", "q", "r"]),
+                    models.Index(
+                        fields=["match", "q", "r"],
+                        name="world_town_match_q_r_idx",
+                    ),
                 ],
                 "constraints": [
                     models.UniqueConstraint(
