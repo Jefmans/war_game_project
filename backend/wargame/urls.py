@@ -19,6 +19,10 @@ urlpatterns = [
         match_views.queue_orders,
     ),
     path(
+        "api/matches/<int:match_id>/resolve-until/",
+        match_views.resolve_until_max,
+    ),
+    path(
         "api/matches/<int:match_id>/turns/<int:turn_number>/state/",
         match_views.turn_state,
     ),

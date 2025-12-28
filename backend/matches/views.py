@@ -400,6 +400,46 @@ def queue_orders(request, match_id):
     )
 
 
+@api_view(["POST"])
+def resolve_until_max(request, match_id):
+    match = get_object_or_404(Match, id=match_id)
+    participants = get_participants(match)
+    if not participants:
+        return Response(
+            {"detail": "match has no participants"},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    max_turn = get_max_turn(match, now=timezone.now(), persist=True)
+    resolved = []
+
+    while True:
+        current_turn = get_current_turn(match)
+        if current_turn.number > max_turn:
+            break
+        previous_resolved = match.last_resolved_turn
+        result = resolve_turn(current_turn)
+        resolved.append({"turn": current_turn.number, "result": result})
+        if match.last_resolved_turn == previous_resolved:
+            return Response(
+                {
+                    "detail": "turn could not be resolved",
+                    "turn": current_turn.number,
+                    "result": result,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+    return Response(
+        {
+            "match_id": match.id,
+            "max_turn": max_turn,
+            "resolved_count": len(resolved),
+            "resolved": resolved,
+        }
+    )
+
+
 @api_view(["GET"])
 def turn_state(request, match_id, turn_number):
     match = get_object_or_404(Match, id=match_id)
