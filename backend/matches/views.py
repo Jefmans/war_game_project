@@ -39,6 +39,14 @@ NEIGHBOR_OFFSETS = (
     (-1, 1),
     (0, 1),
 )
+WANDER_DIRECTIONS = {
+    "N": ((0, -1), (-1, 0), (1, -1)),
+    "S": ((0, 1), (1, 0), (-1, 1)),
+    "E": ((1, 0), (1, -1), (0, 1)),
+    "W": ((-1, 0), (0, -1), (-1, 1)),
+}
+WANDER_SEGMENT_MIN = 4
+WANDER_SEGMENT_MAX = 8
 
 
 @extend_schema(
@@ -291,18 +299,48 @@ def create_match(request):
                             continue
                         rng = random.Random((match.world_seed or 0) ^ unit.id)
                         current_pos = (unit.q, unit.r)
+                        current_dir = None
+                        steps_left = 0
+                        direction_keys = list(WANDER_DIRECTIONS.keys())
                         while next_turn <= max_turn:
-                            neighbors = [
-                                (current_pos[0] + dq, current_pos[1] + dr)
-                                for dq, dr in NEIGHBOR_OFFSETS
-                            ]
-                            valid_neighbors = [
-                                pos for pos in neighbors if pos in tile_set
-                            ]
-                            if valid_neighbors:
-                                destination = rng.choice(valid_neighbors)
+                            if steps_left <= 0 or current_dir is None:
+                                current_dir = rng.choice(direction_keys)
+                                steps_left = rng.randint(
+                                    WANDER_SEGMENT_MIN, WANDER_SEGMENT_MAX
+                                )
+
+                            offsets = WANDER_DIRECTIONS[current_dir]
+                            roll = rng.random()
+                            if roll < 0.7:
+                                order = (0, 1, 2)
+                            elif roll < 0.85:
+                                order = (1, 0, 2)
                             else:
-                                destination = current_pos
+                                order = (2, 0, 1)
+
+                            destination = None
+                            for idx in order:
+                                dq, dr = offsets[idx]
+                                candidate = (current_pos[0] + dq, current_pos[1] + dr)
+                                if candidate in tile_set:
+                                    destination = candidate
+                                    break
+
+                            if destination is None:
+                                neighbors = [
+                                    (current_pos[0] + dq, current_pos[1] + dr)
+                                    for dq, dr in NEIGHBOR_OFFSETS
+                                    if (current_pos[0] + dq, current_pos[1] + dr)
+                                    in tile_set
+                                ]
+                                if neighbors:
+                                    destination = rng.choice(neighbors)
+                                else:
+                                    destination = current_pos
+                                current_dir = None
+                                steps_left = 0
+                            else:
+                                steps_left -= 1
 
                             payload = {
                                 "type": "move",
