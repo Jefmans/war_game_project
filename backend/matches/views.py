@@ -1,5 +1,3 @@
-import random
-
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.db import transaction
@@ -29,24 +27,48 @@ from matches.services import (
     next_turn_for_index,
 )
 from units.models import Unit, UnitType
+from world.pathfinding import find_path, hex_distance
+from world.terrain import movement_cost
+from world.tiles import TileCache
 from world.models import Chunk, Land, Province, Town
 
-NEIGHBOR_OFFSETS = (
-    (1, 0),
-    (1, -1),
-    (0, -1),
-    (-1, 0),
-    (-1, 1),
-    (0, 1),
-)
-WANDER_DIRECTIONS = {
-    "N": ((0, -1), (-1, 0), (1, -1)),
-    "S": ((0, 1), (1, 0), (-1, 1)),
-    "E": ((1, 0), (1, -1), (0, 1)),
-    "W": ((-1, 0), (0, -1), (-1, 1)),
-}
-WANDER_SEGMENT_MIN = 4
-WANDER_SEGMENT_MAX = 8
+
+def _advance_along_path(tile_cache, path, start_index, move_points):
+    spent = 0
+    index = start_index
+    position = path[index]
+    for next_index in range(start_index + 1, len(path)):
+        tile = tile_cache.get_tile(*path[next_index])
+        if tile is None:
+            break
+        step_cost = movement_cost(tile.get("terrain"))
+        if step_cost is None or spent + step_cost > move_points:
+            break
+        spent += step_cost
+        index = next_index
+        position = path[next_index]
+    return index, position
+
+
+def _find_nearest_town_path(tile_cache, start, towns, province_owners, kingdom_id):
+    if not towns:
+        return None, None
+    preferred = [
+        town
+        for town in towns
+        if province_owners.get(town["province_id"]) != kingdom_id
+    ]
+    candidates = preferred or towns
+    candidates = sorted(
+        candidates,
+        key=lambda town: hex_distance(start, (town["q"], town["r"])),
+    )
+    for town in candidates:
+        goal = (town["q"], town["r"])
+        path = find_path(tile_cache, start, goal)
+        if path:
+            return town, path
+    return None, None
 
 
 @extend_schema(
@@ -280,11 +302,18 @@ def create_match(request):
                 participants = get_participants(match)
                 count = len(participants)
                 if count and units_by_kingdom:
-                    tile_set = {
-                        (cell.get("q"), cell.get("r"))
-                        for cell in chunk.tiles.get("cells", [])
-                        if cell.get("q") is not None and cell.get("r") is not None
+                    towns = list(
+                        Town.objects.filter(match=match).values(
+                            "province_id", "q", "r"
+                        )
+                    )
+                    province_owners = {
+                        row["id"]: row["land__kingdom_id"]
+                        for row in Province.objects.filter(match=match).values(
+                            "id", "land__kingdom_id"
+                        )
                     }
+                    tile_cache = TileCache(match)
                     max_turn = get_max_turn(match, now=timezone.now(), persist=False)
                     current_turn_number = match.last_resolved_turn + 1
 
@@ -297,50 +326,25 @@ def create_match(request):
                         )
                         if next_turn is None:
                             continue
-                        rng = random.Random((match.world_seed or 0) ^ unit.id)
                         current_pos = (unit.q, unit.r)
-                        current_dir = None
-                        steps_left = 0
-                        direction_keys = list(WANDER_DIRECTIONS.keys())
+                        path = None
+                        target = None
+                        path_index = 0
                         while next_turn <= max_turn:
-                            if steps_left <= 0 or current_dir is None:
-                                current_dir = rng.choice(direction_keys)
-                                steps_left = rng.randint(
-                                    WANDER_SEGMENT_MIN, WANDER_SEGMENT_MAX
+                            if path is None or path_index >= len(path) - 1:
+                                target, path = _find_nearest_town_path(
+                                    tile_cache,
+                                    current_pos,
+                                    towns,
+                                    province_owners,
+                                    participant.kingdom_id,
                                 )
+                                path_index = 0
 
-                            offsets = WANDER_DIRECTIONS[current_dir]
-                            roll = rng.random()
-                            if roll < 0.7:
-                                order = (0, 1, 2)
-                            elif roll < 0.85:
-                                order = (1, 0, 2)
+                            if target:
+                                destination = (target["q"], target["r"])
                             else:
-                                order = (2, 0, 1)
-
-                            destination = None
-                            for idx in order:
-                                dq, dr = offsets[idx]
-                                candidate = (current_pos[0] + dq, current_pos[1] + dr)
-                                if candidate in tile_set:
-                                    destination = candidate
-                                    break
-
-                            if destination is None:
-                                neighbors = [
-                                    (current_pos[0] + dq, current_pos[1] + dr)
-                                    for dq, dr in NEIGHBOR_OFFSETS
-                                    if (current_pos[0] + dq, current_pos[1] + dr)
-                                    in tile_set
-                                ]
-                                if neighbors:
-                                    destination = rng.choice(neighbors)
-                                else:
-                                    destination = current_pos
-                                current_dir = None
-                                steps_left = 0
-                            else:
-                                steps_left -= 1
+                                destination = current_pos
 
                             payload = {
                                 "type": "move",
@@ -354,7 +358,20 @@ def create_match(request):
                                 participant=participant,
                                 defaults={"payload": payload},
                             )
-                            current_pos = destination
+                            if path:
+                                path_index, current_pos = _advance_along_path(
+                                    tile_cache,
+                                    path,
+                                    path_index,
+                                    unit.unit_type.move_points,
+                                )
+                                if target and current_pos == destination:
+                                    province_owners[target["province_id"]] = (
+                                        participant.kingdom_id
+                                    )
+                                    target = None
+                                    path = None
+                                    path_index = 0
                             next_turn += count
 
         chunk_payload = None

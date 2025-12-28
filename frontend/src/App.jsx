@@ -10,6 +10,8 @@ const DEFAULT_CHUNK_R = Number(import.meta.env.VITE_CHUNK_R || 0);
 const HEX_SIZE = 12;
 const UNIT_ICON_SIZE = HEX_SIZE * 1.2;
 const CASTLE_ICON_SIZE = HEX_SIZE * 1.5;
+const ICON_BG_ALPHA = 0.35;
+const ICON_BG_RADIUS = 0.65;
 const TOWN_NEUTRAL_COLOR = 0xcbd5e1;
 const UNIT_NEUTRAL_COLOR = 0xd1d5db;
 
@@ -87,6 +89,27 @@ function colorForKingdom(id) {
     return 0xdddddd;
   }
   return KINGDOM_COLORS[id % KINGDOM_COLORS.length];
+}
+
+function addIconWithBackground(layer, texture, pos, size, tint) {
+  const container = new PIXI.Container();
+  container.position.set(pos.x, pos.y);
+
+  const background = new PIXI.Graphics();
+  background
+    .circle(0, 0, size * ICON_BG_RADIUS)
+    .fill({ color: tint, alpha: ICON_BG_ALPHA });
+
+  const sprite = new PIXI.Sprite(texture);
+  sprite.anchor.set(0.5);
+  sprite.width = size;
+  sprite.height = size;
+  sprite.tint = tint;
+  sprite.alpha = 0.95;
+
+  container.addChild(background);
+  container.addChild(sprite);
+  layer.addChild(container);
 }
 
 export default function App() {
@@ -396,14 +419,13 @@ export default function App() {
         town.kingdom_id !== null && town.kingdom_id !== undefined
           ? kingdomColorMap[String(town.kingdom_id)] ?? TOWN_NEUTRAL_COLOR
           : TOWN_NEUTRAL_COLOR;
-      const sprite = new PIXI.Sprite(iconTextures.castle);
-      sprite.anchor.set(0.5);
-      sprite.width = CASTLE_ICON_SIZE;
-      sprite.height = CASTLE_ICON_SIZE;
-      sprite.tint = tint;
-      sprite.alpha = 0.95;
-      sprite.position.set(pos.x, pos.y);
-      townLayer.addChild(sprite);
+      addIconWithBackground(
+        townLayer,
+        iconTextures.castle,
+        pos,
+        CASTLE_ICON_SIZE,
+        tint
+      );
     });
   }, [tiles, towns, kingdomColorMap, iconTextures]);
 
@@ -429,14 +451,13 @@ export default function App() {
         kingdomColorMap[String(unit.owner_kingdom_id)] ?? UNIT_NEUTRAL_COLOR;
 
       if (infantryTexture) {
-        const sprite = new PIXI.Sprite(infantryTexture);
-        sprite.anchor.set(0.5);
-        sprite.width = UNIT_ICON_SIZE;
-        sprite.height = UNIT_ICON_SIZE;
-        sprite.tint = tint;
-        sprite.alpha = 0.95;
-        sprite.position.set(pos.x, pos.y);
-        unitIconsLayer.addChild(sprite);
+        addIconWithBackground(
+          unitIconsLayer,
+          infantryTexture,
+          pos,
+          UNIT_ICON_SIZE,
+          tint
+        );
       } else {
         unitFallbackLayer
           .circle(pos.x, pos.y, HEX_SIZE * 0.45)
