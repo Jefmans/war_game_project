@@ -43,3 +43,11 @@ export function queueOrders(matchId, payload) {
     body: JSON.stringify(payload),
   });
 }
+
+export function submitOrder(matchId, payload) {
+  return request(`/api/matches/${matchId}/orders/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}

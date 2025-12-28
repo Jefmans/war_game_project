@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as PIXI from "pixi.js";
-import { getChunk, getMatchState, getTurnState, queueOrders } from "./api";
+import {
+  getChunk,
+  getMatchState,
+  getTurnState,
+  queueOrders,
+  submitOrder,
+} from "./api";
 import swordmanUrl from "./assets/swordman.png";
 import townUrl from "./assets/town.png";
 
@@ -829,6 +835,42 @@ export default function App() {
     }
   };
 
+  const handleSubmitCurrentTurn = async () => {
+    if (!selectedParticipantId) {
+      setOrderStatus("Select a participant first.");
+      return;
+    }
+    if (!selectedUnitId) {
+      setOrderStatus("Select a unit to move.");
+      return;
+    }
+    if (!selectedTile) {
+      setOrderStatus("Click a destination tile on the map.");
+      return;
+    }
+    setOrderLoading(true);
+    setOrderStatus("Submitting current turn...");
+    try {
+      const response = await submitOrder(matchId, {
+        participant_id: selectedParticipantId,
+        order: {
+          type: "move",
+          unit_id: selectedUnitId,
+          to: { q: selectedTile.q, r: selectedTile.r },
+        },
+      });
+      setOrderStatus(
+        `Resolved turn ${response.turn}. Next turn ${response.next_turn}.`
+      );
+      setPendingOrders([]);
+      await loadAll(viewMode);
+    } catch (error) {
+      setOrderStatus(error.message || "Failed to submit order.");
+    } finally {
+      setOrderLoading(false);
+    }
+  };
+
   return (
     <div className="app">
       <header className="app-header">
@@ -981,6 +1023,15 @@ export default function App() {
               disabled={!selectedUnitId || !selectedTile}
             >
               Add move
+            </button>
+          </div>
+          <div className="button-row">
+            <button
+              className="primary full"
+              onClick={handleSubmitCurrentTurn}
+              disabled={!selectedUnitId || !selectedTile || orderLoading}
+            >
+              Submit current turn
             </button>
           </div>
           <div className="orders-list">
