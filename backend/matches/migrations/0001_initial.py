@@ -28,7 +28,6 @@ class Migration(migrations.Migration):
                 ("turn_length_seconds", models.PositiveIntegerField(default=10800)),
                 ("start_time", models.DateTimeField(blank=True, null=True)),
                 ("last_resolved_turn", models.PositiveIntegerField(default=0)),
-                ("max_turn_override", models.PositiveIntegerField(blank=True, null=True)),
                 ("world_seed", models.BigIntegerField(blank=True, null=True)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
             ],
