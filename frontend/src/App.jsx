@@ -908,9 +908,16 @@ export default function App() {
         clickedUnit &&
         closestUnitDist <= UNIT_CLICK_RADIUS * UNIT_CLICK_RADIUS
       ) {
-        setSelectedUnitId(clickedUnit.id);
-        setRoutePath([]);
-        setOrderStatus("");
+        if (selectedUnitId === clickedUnit.id) {
+          setRoutePath([]);
+          setPendingOrders([]);
+          setSelectedTile(null);
+          setOrderStatus("Route cleared.");
+        } else {
+          setSelectedUnitId(clickedUnit.id);
+          setRoutePath([]);
+          setOrderStatus("");
+        }
         return;
       }
 
@@ -1496,7 +1503,8 @@ export default function App() {
           </div>
           {orderStatus ? <div className="hint">{orderStatus}</div> : null}
           <div className="hint">
-            Tip: click your unit, then a destination tile to plan a route.
+            Tip: click your unit, then a destination tile to plan a route. Click
+            the unit again to clear.
           </div>
           <div className="panel-title">Overlays</div>
           <label className="toggle">
