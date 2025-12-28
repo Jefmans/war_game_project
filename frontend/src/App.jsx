@@ -14,7 +14,7 @@ const ICON_BG_ALPHA = 0.75;
 const ICON_BG_RADIUS = 0.65;
 const TOWN_NEUTRAL_COLOR = 0xcbd5e1;
 const UNIT_NEUTRAL_COLOR = 0xd1d5db;
-const OWNED_TILE_ALPHA = 0.5;
+const OWNED_TILE_ALPHA = 0.0;
 const OWNED_BORDER_WIDTH = 2.6;
 const OWNED_BORDER_ALPHA = 1;
 
