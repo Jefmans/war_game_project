@@ -80,6 +80,11 @@ function drawHex(graphics, x, y, size, color, alpha = 1) {
     .stroke(TILE_STROKE);
 }
 
+function fillHex(graphics, x, y, size, color, alpha = 1) {
+  const points = hexPoints(x, y, size);
+  graphics.poly(points).fill({ color, alpha });
+}
+
 function hexCorners(x, y, size) {
   const corners = [];
   for (let i = 0; i < 6; i += 1) {
@@ -307,10 +312,19 @@ export default function App() {
           ? tileColorMap[String(kingdomId)] ?? null
           : null;
       const isOwned = ownerColor !== null && ownerColor !== undefined;
-      const color =
-        ownerColor ?? TERRAIN_COLORS[cell.terrain] ?? TERRAIN_COLORS.plains;
-      const fillAlpha = isOwned ? OWNED_TILE_ALPHA : 1;
-      drawHex(tilesLayer, pos.x, pos.y, HEX_SIZE, color, fillAlpha);
+      const terrainColor =
+        TERRAIN_COLORS[cell.terrain] ?? TERRAIN_COLORS.plains;
+      drawHex(tilesLayer, pos.x, pos.y, HEX_SIZE, terrainColor, 1);
+      if (isOwned) {
+        fillHex(
+          tilesLayer,
+          pos.x,
+          pos.y,
+          HEX_SIZE,
+          ownerColor,
+          OWNED_TILE_ALPHA
+        );
+      }
     });
 
     tiles.forEach((cell) => {
@@ -464,8 +478,15 @@ export default function App() {
       return;
     }
 
+    const seenTownTiles = new Set();
+
     (towns || []).forEach((town) => {
-      const pos = positions.get(`${town.q},${town.r}`);
+      const key = `${town.q},${town.r}`;
+      if (seenTownTiles.has(key)) {
+        return;
+      }
+      seenTownTiles.add(key);
+      const pos = positions.get(key);
       if (!pos) {
         return;
       }
