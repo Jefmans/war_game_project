@@ -10,15 +10,19 @@ from world.models import Land, Province, Town
 
 def resolve_turn(turn):
     match = turn.match
-    if turn.active_participant is None:
-        return {"status": "invalid", "reason": "no active participant"}
-    order = Order.objects.filter(turn=turn, participant=turn.active_participant).first()
+    participant = turn.participant
+    if participant is None:
+        return {"status": "invalid", "reason": "no participant"}
+    order = Order.objects.filter(turn=turn).first()
     if not order:
         order = Order.objects.create(
             turn=turn,
-            participant=turn.active_participant,
+            participant=participant,
             payload={"type": "pass"},
         )
+    elif order.participant_id != participant.id:
+        order.participant = participant
+        order.save(update_fields=["participant"])
 
     payload = order.payload or {}
     result = {"order_id": order.id, "actions": []}
@@ -30,10 +34,15 @@ def resolve_turn(turn):
     turn.status = Turn.STATUS_RESOLVED
     turn.resolved_at = timezone.now()
     turn.state = build_turn_state(match, result)
-    turn.save(update_fields=["status", "resolved_at", "state"])
+    if turn.history_index is None:
+        turn.history_index = match.last_resolved_turn + 1
+    turn.save(update_fields=["status", "resolved_at", "state", "history_index"])
 
-    if match.last_resolved_turn < turn.number:
-        match.last_resolved_turn = turn.number
+    if participant.last_resolved_turn < turn.number:
+        participant.last_resolved_turn = turn.number
+        participant.save(update_fields=["last_resolved_turn"])
+    if match.last_resolved_turn < turn.history_index:
+        match.last_resolved_turn = turn.history_index
         match.save(update_fields=["last_resolved_turn"])
 
     return result

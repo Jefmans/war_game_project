@@ -51,6 +51,8 @@ class MatchParticipant(models.Model):
         related_name="participants",
     )
     is_active = models.BooleanField(default=True)
+    last_resolved_turn = models.PositiveIntegerField(default=0)
+    max_turn_override = models.PositiveIntegerField(null=True, blank=True)
     joined_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -77,14 +79,13 @@ class Turn(models.Model):
     ]
 
     match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name="turns")
-    number = models.PositiveIntegerField()
-    active_participant = models.ForeignKey(
+    participant = models.ForeignKey(
         MatchParticipant,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="active_turns",
+        on_delete=models.CASCADE,
+        related_name="turns",
     )
+    number = models.PositiveIntegerField()
+    history_index = models.PositiveIntegerField(null=True, blank=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_PENDING)
     state = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -92,12 +93,19 @@ class Turn(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["match", "number"], name="unique_match_turn")
+            models.UniqueConstraint(
+                fields=["match", "participant", "number"],
+                name="unique_match_participant_turn",
+            ),
+            models.UniqueConstraint(
+                fields=["match", "history_index"],
+                name="unique_match_history_index",
+            ),
         ]
-        ordering = ["number"]
+        ordering = ["history_index", "number"]
 
     def __str__(self):
-        return f"Turn {self.number} (Match {self.match_id})"
+        return f"Turn {self.number} (Participant {self.participant_id})"
 
 
 class Order(models.Model):
@@ -113,8 +121,8 @@ class Order(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["turn", "participant"],
-                name="unique_turn_participant",
+                fields=["turn"],
+                name="unique_turn_order",
             )
         ]
 

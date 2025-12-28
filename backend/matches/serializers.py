@@ -39,6 +39,10 @@ class QueueOrdersSerializer(serializers.Serializer):
     orders = OrderPayloadSerializer(many=True)
 
 
+class ResolveUntilSerializer(serializers.Serializer):
+    participant_id = serializers.IntegerField()
+
+
 class ParticipantInputSerializer(serializers.Serializer):
     user_id = serializers.IntegerField(required=False)
     username = serializers.CharField(required=False)
@@ -46,6 +50,9 @@ class ParticipantInputSerializer(serializers.Serializer):
     seat_order = serializers.IntegerField(required=False, min_value=1)
     kingdom_name = serializers.CharField(required=False, allow_blank=True)
     is_active = serializers.BooleanField(required=False, default=True)
+    max_turn_override = serializers.IntegerField(
+        required=False, allow_null=True, min_value=1
+    )
 
     def validate(self, data):
         if not data.get("user_id") and not data.get("username"):

@@ -140,6 +140,22 @@ function formatColor(color) {
   return `#${color.toString(16).padStart(6, "0")}`;
 }
 
+function computeOverallTurn(participant, overallMaxTurn) {
+  if (!participant || !Number.isFinite(overallMaxTurn)) {
+    return null;
+  }
+  const participantMax = participant.max_turn;
+  const nextTurn =
+    participant.next_turn ??
+    (Number.isFinite(participant.last_resolved_turn)
+      ? participant.last_resolved_turn + 1
+      : null);
+  if (!Number.isFinite(participantMax) || !Number.isFinite(nextTurn)) {
+    return null;
+  }
+  return overallMaxTurn - (participantMax - nextTurn);
+}
+
 function movementCost(terrain) {
   if (terrain === undefined || terrain === null) {
     return 1;
@@ -302,7 +318,7 @@ export default function App() {
   const [chunkR, setChunkR] = useState(DEFAULT_CHUNK_R);
   const [turnNumber, setTurnNumber] = useState(1);
   const [lastResolved, setLastResolved] = useState(1);
-  const [activeParticipant, setActiveParticipant] = useState(null);
+  const [overallMaxTurn, setOverallMaxTurn] = useState(null);
   const [turnLength, setTurnLength] = useState(null);
   const [tiles, setTiles] = useState([]);
   const [provinceToLand, setProvinceToLand] = useState({});
@@ -365,6 +381,11 @@ export default function App() {
     return color !== undefined ? color : null;
   }, [selectedParticipant, kingdomColorMap]);
 
+  const selectedParticipantOverallTurn = useMemo(
+    () => computeOverallTurn(selectedParticipant, overallMaxTurn),
+    [selectedParticipant, overallMaxTurn]
+  );
+
   const ownedUnits = useMemo(() => {
     if (!selectedParticipant || !turnState?.units) {
       return [];
@@ -400,13 +421,8 @@ export default function App() {
     ) {
       return;
     }
-    const activeCandidate = participants.some(
-      (participant) => participant.id === activeParticipant
-    )
-      ? activeParticipant
-      : null;
-    setSelectedParticipantId(activeCandidate ?? participants[0].id);
-  }, [participants, selectedParticipantId, activeParticipant]);
+    setSelectedParticipantId(participants[0].id);
+  }, [participants, selectedParticipantId]);
 
   useEffect(() => {
     if (!ownedUnits.length) {
@@ -1127,12 +1143,12 @@ export default function App() {
     setStatus("");
     try {
       const matchState = await getMatchState(matchId);
-      const resolved = Math.max(matchState.match.last_resolved_turn || 1, 1);
+      const resolved = Math.max(matchState.match.last_resolved_turn || 0, 1);
       setLastResolved(resolved);
-      setActiveParticipant(matchState.current_turn.active_participant_id);
+      setOverallMaxTurn(matchState.max_turn ?? null);
       setTurnLength(matchState.match.turn_length_seconds);
       setParticipants(matchState.participants || []);
-      const currentTurn = matchState.current_turn.number;
+      const currentTurn = Math.max(matchState.match.last_resolved_turn || 0, 1);
       setLiveTurnNumber(currentTurn);
       const nextKingdomColorMap = {};
       (matchState.participants || [])
@@ -1232,8 +1248,7 @@ export default function App() {
       });
       const queuedCount = response.queued?.length ?? 0;
       const skippedCount = response.skipped?.length ?? 0;
-      const extra =
-        skippedCount > 0 ? ` Skipped ${skippedCount} beyond max turn.` : "";
+      const extra = skippedCount > 0 ? ` Skipped ${skippedCount} order(s).` : "";
       setOrderStatus(`Queued ${queuedCount} order(s).${extra}`);
       setPendingOrders([]);
     } catch (error) {
@@ -1270,8 +1285,11 @@ export default function App() {
           to: { q: destination.q, r: destination.r },
         },
       });
+      const historyLabel = Number.isFinite(response.history_index)
+        ? ` (history ${response.history_index})`
+        : "";
       setOrderStatus(
-        `Resolved turn ${response.turn}. Next turn ${response.next_turn}.`
+        `Resolved participant turn ${response.participant_turn}${historyLabel}. Next turn ${response.next_turn}.`
       );
       setPendingOrders((prev) => (pending ? prev.slice(1) : prev));
       await loadAll(viewMode);
@@ -1357,12 +1375,12 @@ export default function App() {
           <div className="panel-title">Turn Controls</div>
           <div className="turn-meta">
             <div>
-              {viewMode === "live" ? "Live turn" : "Viewing turn"}{" "}
+              {viewMode === "live" ? "Live history" : "Viewing history"}{" "}
               <strong>{displayTurn}</strong> of{" "}
               <strong>{lastResolved}</strong>
             </div>
             <div>Mode: {viewMode}</div>
-            <div>Active participant: {activeParticipant ?? "-"}</div>
+            <div>Overall max turn: {overallMaxTurn ?? "-"}</div>
             <div>
               Turn length: {turnLength ? `${turnLength}s` : "-"}
             </div>
@@ -1387,12 +1405,27 @@ export default function App() {
                     ? null
                     : kingdomColorMap[String(participant.kingdom_id)];
                 const colorLabel = formatColor(colorValue);
+                const nextTurn =
+                  participant.next_turn ??
+                  (Number.isFinite(participant.last_resolved_turn)
+                    ? participant.last_resolved_turn + 1
+                    : null);
+                const maxTurn = Number.isFinite(participant.max_turn)
+                  ? participant.max_turn
+                  : null;
+                const overallTurn = computeOverallTurn(
+                  participant,
+                  overallMaxTurn
+                );
                 return (
                   <option key={participant.id} value={participant.id}>
                     {participant.user_id
                       ? `User ${participant.user_id}`
                       : `Participant ${participant.id}`} (seat{" "}
-                    {participant.seat_order}) - color {colorLabel}
+                    {participant.seat_order}) - turn {nextTurn ?? "-"} /{" "}
+                    {maxTurn ?? "-"}{" "}
+                    {overallTurn !== null ? `(overall ${overallTurn})` : ""} -
+                    color {colorLabel}
                   </option>
                 );
               })}
@@ -1403,7 +1436,13 @@ export default function App() {
               participant_id: {selectedParticipant.id} | user_id:{" "}
               {selectedParticipant.user_id ?? "-"} | kingdom_id:{" "}
               {selectedParticipant.kingdom_id ?? "-"} | seat:{" "}
-              {selectedParticipant.seat_order ?? "-"} | color:{" "}
+              {selectedParticipant.seat_order ?? "-"} | turn:{" "}
+              {selectedParticipant.next_turn ??
+                (Number.isFinite(selectedParticipant.last_resolved_turn)
+                  ? selectedParticipant.last_resolved_turn + 1
+                  : "-")}{" "}
+              / {selectedParticipant.max_turn ?? "-"} | overall:{" "}
+              {selectedParticipantOverallTurn ?? "-"} | color:{" "}
               {formatColor(selectedParticipantColor)}{" "}
               <span
                 className="color-swatch"

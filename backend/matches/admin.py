@@ -38,6 +38,8 @@ class MatchParticipantAdmin(admin.ModelAdmin):
         "kingdom_id",
         "kingdom",
         "is_active",
+        "last_resolved_turn",
+        "max_turn_override",
     )
     list_filter = ("match", "kingdom", "is_active")
 
@@ -49,9 +51,10 @@ class TurnAdmin(admin.ModelAdmin):
         "match_id",
         "match",
         "number",
+        "history_index",
+        "participant_id",
+        "participant",
         "status",
-        "active_participant_id",
-        "active_participant",
         "created_at",
     )
     list_filter = ("match", "status")

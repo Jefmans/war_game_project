@@ -1,6 +1,6 @@
 from django.utils import timezone
 
-from matches.models import MatchParticipant, Turn
+from matches.models import Turn
 
 
 def get_max_turn(match, now=None, persist=False):
@@ -31,47 +31,17 @@ def get_participants(match):
     return list(match.participants.order_by("seat_order"))
 
 
-def get_participant_index(participants, participant_id):
-    for index, participant in enumerate(participants):
-        if participant.id == participant_id:
-            return index
-    return None
+def get_participant_max_turn(match, participant, now=None, persist=False):
+    match_max = get_max_turn(match, now=now, persist=persist)
+    if participant.max_turn_override is None:
+        return match_max
+    return min(match_max, participant.max_turn_override)
 
 
-def next_turn_for_index(start_turn, index, count):
-    if count <= 0:
-        return None
-    current_mod = (start_turn - 1) % count
-    if current_mod <= index:
-        delta = index - current_mod
-    else:
-        delta = count - (current_mod - index)
-    return start_turn + delta
-
-
-def get_active_participant(match, turn_number):
-    turn = (
-        Turn.objects.filter(match=match, number=turn_number)
-        .select_related("active_participant")
-        .first()
-    )
-    if not turn:
-        return None
-    return turn.active_participant
-
-
-def ensure_turn(match, turn_number, active_participant=None):
-    turn, created = Turn.objects.get_or_create(
+def ensure_turn(match, participant, turn_number):
+    turn, _ = Turn.objects.get_or_create(
         match=match,
+        participant=participant,
         number=turn_number,
-        defaults={"active_participant": active_participant},
     )
-    if not created and active_participant and turn.active_participant is None:
-        turn.active_participant = active_participant
-        turn.save(update_fields=["active_participant"])
     return turn
-
-
-def get_current_turn(match):
-    turn_number = match.last_resolved_turn + 1
-    return ensure_turn(match, turn_number)

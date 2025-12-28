@@ -9,18 +9,19 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework import status
 
-from matches.models import Kingdom, Match, MatchParticipant, Order
+from matches.models import Kingdom, Match, MatchParticipant, Order, Turn
 from matches.resolution import build_turn_state, resolve_turn
 from matches.serializers import (
     CreateMatchSerializer,
     MaxTurnOverrideSerializer,
     QueueOrdersSerializer,
+    ResolveUntilSerializer,
     SubmitOrderSerializer,
 )
 from matches.services import (
-    ensure_turn,
-    get_current_turn,
     get_max_turn,
+    get_participant_max_turn,
+    ensure_turn,
     get_participants,
 )
 from units.models import Unit, UnitType
@@ -201,6 +202,7 @@ def create_match(request):
                 seat_order=seat_order,
                 kingdom=kingdom,
                 is_active=entry.get("is_active", True),
+                max_turn_override=entry.get("max_turn_override"),
             )
             participants_payload.append(
                 {
@@ -209,6 +211,8 @@ def create_match(request):
                     "seat_order": participant.seat_order,
                     "kingdom_id": participant.kingdom_id,
                     "is_active": participant.is_active,
+                    "last_resolved_turn": participant.last_resolved_turn,
+                    "max_turn_override": participant.max_turn_override,
                 }
             )
 
@@ -312,14 +316,17 @@ def create_match(request):
                         )
                     }
                     tile_cache = TileCache(match)
-                    max_turn = get_max_turn(match, now=timezone.now(), persist=False)
-                    current_turn_number = match.last_resolved_turn + 1
-
                     for participant in participants:
                         unit = units_by_kingdom.get(participant.kingdom_id)
                         if not unit:
                             continue
-                        next_turn = current_turn_number
+                        max_turn = get_participant_max_turn(
+                            match,
+                            participant,
+                            now=timezone.now(),
+                            persist=False,
+                        )
+                        next_turn = participant.last_resolved_turn + 1
                         current_pos = (unit.q, unit.r)
                         path = None
                         target = None
@@ -345,14 +352,13 @@ def create_match(request):
                                 "unit_id": unit.id,
                                 "to": {"q": destination[0], "r": destination[1]},
                             }
-                            turn = ensure_turn(match, next_turn)
-                            if turn.active_participant_id is None:
-                                turn.active_participant = participant
-                                turn.save(update_fields=["active_participant"])
+                            turn = ensure_turn(match, participant, next_turn)
                             Order.objects.update_or_create(
                                 turn=turn,
-                                participant=participant,
-                                defaults={"payload": payload},
+                                defaults={
+                                    "participant": participant,
+                                    "payload": payload,
+                                },
                             )
                             if path:
                                 path_index, current_pos = _advance_along_path(
@@ -402,14 +408,30 @@ def create_match(request):
 @api_view(["GET"])
 def match_state(request, match_id):
     match = get_object_or_404(Match, id=match_id)
-    current_turn = get_current_turn(match)
     max_turn = get_max_turn(match, now=timezone.now(), persist=False)
+    history_turn = max(match.last_resolved_turn, 1)
 
-    participants = list(
-        match.participants.order_by("seat_order").values(
-            "id", "user_id", "seat_order", "kingdom_id", "is_active"
+    participants_payload = []
+    for participant in match.participants.order_by("seat_order"):
+        participant_max = get_participant_max_turn(
+            match,
+            participant,
+            now=timezone.now(),
+            persist=False,
         )
-    )
+        participants_payload.append(
+            {
+                "id": participant.id,
+                "user_id": participant.user_id,
+                "seat_order": participant.seat_order,
+                "kingdom_id": participant.kingdom_id,
+                "is_active": participant.is_active,
+                "last_resolved_turn": participant.last_resolved_turn,
+                "next_turn": participant.last_resolved_turn + 1,
+                "max_turn": participant_max,
+                "max_turn_override": participant.max_turn_override,
+            }
+        )
 
     return Response(
         {
@@ -424,11 +446,11 @@ def match_state(request, match_id):
                 "max_turn_override": match.max_turn_override,
             },
             "current_turn": {
-                "number": current_turn.number,
-                "active_participant_id": current_turn.active_participant_id,
+                "number": history_turn,
+                "active_participant_id": None,
             },
             "max_turn": max_turn,
-            "participants": participants,
+            "participants": participants_payload,
         }
     )
 
@@ -467,8 +489,8 @@ def queue_orders(request, match_id):
         MatchParticipant, match=match, id=participant_id, is_active=True
     )
 
-    max_turn = get_max_turn(match, now=timezone.now(), persist=True)
-    next_turn_number = match.last_resolved_turn + 1
+    max_turn = get_participant_max_turn(match, participant, now=timezone.now(), persist=True)
+    next_turn_number = participant.last_resolved_turn + 1
 
     queued = []
     skipped = []
@@ -478,33 +500,24 @@ def queue_orders(request, match_id):
             skipped.append({"order": payload, "reason": "beyond max_turn"})
             continue
 
-        assigned = False
-        candidate = next_turn_number
-        while candidate <= max_turn:
-            turn = ensure_turn(match, candidate)
-            if turn.active_participant_id is None:
-                turn.active_participant = participant
-                turn.save(update_fields=["active_participant"])
-            if turn.active_participant_id == participant.id:
-                order, created = Order.objects.update_or_create(
-                    turn=turn,
-                    participant=participant,
-                    defaults={"payload": payload},
-                )
-                queued.append(
-                    {"turn": turn.number, "order_id": order.id, "created": created}
-                )
-                next_turn_number = candidate + 1
-                assigned = True
-                break
-            candidate += 1
-
-        if not assigned:
-            skipped.append({"order": payload, "reason": "no available turn"})
+        turn = ensure_turn(match, participant, next_turn_number)
+        if turn.status == Turn.STATUS_RESOLVED:
+            skipped.append(
+                {"order": payload, "reason": "turn already resolved"}
+            )
+            next_turn_number += 1
+            continue
+        order, created = Order.objects.update_or_create(
+            turn=turn,
+            defaults={"participant": participant, "payload": payload},
+        )
+        queued.append({"turn": turn.number, "order_id": order.id, "created": created})
+        next_turn_number += 1
 
     return Response(
         {
             "match_id": match.id,
+            "participant_id": participant.id,
             "max_turn": max_turn,
             "queued": queued,
             "skipped": skipped,
@@ -512,40 +525,41 @@ def queue_orders(request, match_id):
     )
 
 
+@extend_schema(request=ResolveUntilSerializer)
 @api_view(["POST"])
 def resolve_until_max(request, match_id):
     match = get_object_or_404(Match, id=match_id)
-    participants = get_participants(match)
-    if not participants:
-        return Response(
-            {"detail": "match has no participants"},
-            status=status.HTTP_409_CONFLICT,
-        )
+    serializer = ResolveUntilSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    participant_id = serializer.validated_data["participant_id"]
+    participant = get_object_or_404(
+        MatchParticipant, match=match, id=participant_id, is_active=True
+    )
 
-    max_turn = get_max_turn(match, now=timezone.now(), persist=True)
+    max_turn = get_participant_max_turn(match, participant, now=timezone.now(), persist=True)
     resolved = []
 
-    while True:
-        current_turn = get_current_turn(match)
-        if current_turn.number > max_turn:
-            break
-        if current_turn.active_participant_id is None:
-            return Response(
-                {
-                    "detail": "turn has no active participant",
-                    "turn": current_turn.number,
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
-        previous_resolved = match.last_resolved_turn
-        result = resolve_turn(current_turn)
-        match.refresh_from_db(fields=["last_resolved_turn"])
-        resolved.append({"turn": current_turn.number, "result": result})
-        if match.last_resolved_turn == previous_resolved:
+    while participant.last_resolved_turn < max_turn:
+        turn_number = participant.last_resolved_turn + 1
+        turn = ensure_turn(match, participant, turn_number)
+        if turn.status == Turn.STATUS_RESOLVED:
+            participant.refresh_from_db(fields=["last_resolved_turn"])
+            continue
+        previous_turn = participant.last_resolved_turn
+        result = resolve_turn(turn)
+        participant.refresh_from_db(fields=["last_resolved_turn"])
+        resolved.append(
+            {
+                "turn": turn.number,
+                "history_index": turn.history_index,
+                "result": result,
+            }
+        )
+        if participant.last_resolved_turn == previous_turn:
             return Response(
                 {
                     "detail": "turn could not be resolved",
-                    "turn": current_turn.number,
+                    "turn": turn.number,
                     "result": result,
                 },
                 status=status.HTTP_409_CONFLICT,
@@ -554,6 +568,7 @@ def resolve_until_max(request, match_id):
     return Response(
         {
             "match_id": match.id,
+            "participant_id": participant.id,
             "max_turn": max_turn,
             "resolved_count": len(resolved),
             "resolved": resolved,
@@ -564,12 +579,29 @@ def resolve_until_max(request, match_id):
 @api_view(["GET"])
 def turn_state(request, match_id, turn_number):
     match = get_object_or_404(Match, id=match_id)
-    turn = ensure_turn(match, turn_number)
+    turn = Turn.objects.filter(match=match, history_index=turn_number).first()
+    if not turn:
+        latest = (
+            Turn.objects.filter(match=match, status=Turn.STATUS_RESOLVED)
+            .order_by("-history_index")
+            .first()
+        )
+        state = latest.state if latest and latest.state else build_turn_state(match)
+        return Response(
+            {
+                "match_id": match.id,
+                "turn": turn_number,
+                "status": Turn.STATUS_PENDING,
+                "resolved_at": None,
+                "state": state,
+            }
+        )
+
     if turn.status != turn.STATUS_RESOLVED:
         return Response(
             {
                 "match_id": match.id,
-                "turn": turn.number,
+                "turn": turn.history_index,
                 "status": turn.status,
                 "resolved_at": turn.resolved_at,
                 "state": build_turn_state(match),
@@ -579,10 +611,12 @@ def turn_state(request, match_id, turn_number):
     return Response(
         {
             "match_id": match.id,
-            "turn": turn.number,
+            "turn": turn.history_index,
             "status": turn.status,
             "resolved_at": turn.resolved_at,
             "state": turn.state or {},
+            "participant_id": turn.participant_id,
+            "participant_turn": turn.number,
         }
     )
 
@@ -600,42 +634,35 @@ def submit_order(request, match_id):
         MatchParticipant, match=match, id=participant_id, is_active=True
     )
 
-    max_turn = get_max_turn(match, now=timezone.now(), persist=True)
-    current_turn = get_current_turn(match)
-    if current_turn.number > max_turn:
+    max_turn = get_participant_max_turn(match, participant, now=timezone.now(), persist=True)
+    next_turn_number = participant.last_resolved_turn + 1
+    if next_turn_number > max_turn:
         return Response(
             {"detail": "turn not available yet", "max_turn": max_turn},
             status=status.HTTP_409_CONFLICT,
         )
 
-    if (
-        current_turn.active_participant_id is not None
-        and current_turn.active_participant_id != participant.id
-    ):
+    turn = ensure_turn(match, participant, next_turn_number)
+    if turn.status == Turn.STATUS_RESOLVED:
         return Response(
-            {
-                "detail": "turn reserved by another participant",
-                "active_participant_id": current_turn.active_participant_id,
-            },
+            {"detail": "turn already resolved", "turn": turn.number},
             status=status.HTTP_409_CONFLICT,
         )
-    if current_turn.active_participant_id is None:
-        current_turn.active_participant = participant
-        current_turn.save(update_fields=["active_participant"])
 
-    order, _ = Order.objects.update_or_create(
-        turn=current_turn,
-        participant=participant,
-        defaults={"payload": payload},
+    Order.objects.update_or_create(
+        turn=turn,
+        defaults={"participant": participant, "payload": payload},
     )
 
-    result = resolve_turn(current_turn)
+    result = resolve_turn(turn)
     return Response(
         {
-            "turn": current_turn.number,
+            "participant_turn": turn.number,
+            "history_index": turn.history_index,
             "resolved": True,
             "result": result,
-            "next_turn": current_turn.number + 1,
+            "next_turn": turn.number + 1,
+            "max_turn": max_turn,
         }
     )
 
@@ -656,8 +683,8 @@ def chunk_detail(request, match_id, chunk_q, chunk_r):
                 {"detail": "turn must be an integer"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        turn = get_object_or_404(chunk.match.turns, number=turn_number)
-        if turn.status == turn.STATUS_RESOLVED:
+        turn = Turn.objects.filter(match=chunk.match, history_index=turn_number).first()
+        if turn and turn.status == turn.STATUS_RESOLVED:
             state = turn.state or {}
             snapshot_province_to_land = state.get("province_to_land")
             snapshot_land_to_kingdom = state.get("land_to_kingdom")
