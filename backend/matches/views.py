@@ -419,6 +419,7 @@ def resolve_until_max(request, match_id):
             break
         previous_resolved = match.last_resolved_turn
         result = resolve_turn(current_turn)
+        match.refresh_from_db(fields=["last_resolved_turn"])
         resolved.append({"turn": current_turn.number, "result": result})
         if match.last_resolved_turn == previous_resolved:
             return Response(
