@@ -12,7 +12,7 @@
       - /var/lib/docker/volumes:/var/lib/docker/volumes
   web:
     build: .
-    command: sh -c "python manage.py migrate && python manage.py ensure_superuser && python manage.py runserver 0.0.0.0:8000"
+    command: sh -c "python wait_for_db.py && python manage.py migrate && python manage.py ensure_superuser && python manage.py runserver 0.0.0.0:8000"
     volumes:
       - ./backend:/app
     ports:
