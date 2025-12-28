@@ -116,6 +116,16 @@ body {
   color: var(--muted);
 }
 
+.color-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 .controls .toggle {
   flex-direction: row;
   align-items: center;

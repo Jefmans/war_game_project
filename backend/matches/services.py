@@ -50,11 +50,14 @@ def next_turn_for_index(start_turn, index, count):
 
 
 def get_active_participant(match, turn_number):
-    participants = get_participants(match)
-    if not participants:
+    turn = (
+        Turn.objects.filter(match=match, number=turn_number)
+        .select_related("active_participant")
+        .first()
+    )
+    if not turn:
         return None
-    index = (turn_number - 1) % len(participants)
-    return participants[index]
+    return turn.active_participant
 
 
 def ensure_turn(match, turn_number, active_participant=None):
@@ -71,5 +74,4 @@ def ensure_turn(match, turn_number, active_participant=None):
 
 def get_current_turn(match):
     turn_number = match.last_resolved_turn + 1
-    active_participant = get_active_participant(match, turn_number)
-    return ensure_turn(match, turn_number, active_participant)
+    return ensure_turn(match, turn_number)

@@ -20,7 +20,7 @@ const ICON_BG_ALPHA = 0.75;
 const ICON_BG_RADIUS = 0.65;
 const TOWN_NEUTRAL_COLOR = 0xcbd5e1;
 const UNIT_NEUTRAL_COLOR = 0xd1d5db;
-const OWNED_TILE_ALPHA = 0.1;
+const OWNED_TILE_ALPHA = 0.2;
 const OWNED_BORDER_WIDTH = 2.6;
 const OWNED_BORDER_ALPHA = 1;
 const SELECTED_TILE_STROKE = { width: 2.4, color: 0xfbbf24, alpha: 0.9 };
@@ -112,6 +112,13 @@ function colorForKingdom(id) {
   return KINGDOM_COLORS[id % KINGDOM_COLORS.length];
 }
 
+function formatColor(color) {
+  if (color === null || color === undefined) {
+    return "-";
+  }
+  return `#${color.toString(16).padStart(6, "0")}`;
+}
+
 function addIconWithBackground(layer, texture, pos, size, tint) {
   const container = new PIXI.Container();
   container.position.set(pos.x, pos.y);
@@ -178,6 +185,18 @@ export default function App() {
       null,
     [participants, selectedParticipantId]
   );
+
+  const selectedParticipantColor = useMemo(() => {
+    if (
+      !selectedParticipant ||
+      selectedParticipant.kingdom_id === null ||
+      selectedParticipant.kingdom_id === undefined
+    ) {
+      return null;
+    }
+    const color = kingdomColorMap[String(selectedParticipant.kingdom_id)];
+    return color !== undefined ? color : null;
+  }, [selectedParticipant, kingdomColorMap]);
 
   const ownedUnits = useMemo(() => {
     if (!selectedParticipant || !turnState?.units) {
@@ -969,13 +988,22 @@ export default function App() {
               <option value="" disabled>
                 Choose participant
               </option>
-              {participants.map((participant) => (
-                <option key={participant.id} value={participant.id}>
-                  {participant.user_id
-                    ? `User ${participant.user_id}`
-                    : `Participant ${participant.id}`} (seat {participant.seat_order})
-                </option>
-              ))}
+              {participants.map((participant) => {
+                const colorValue =
+                  participant.kingdom_id === null ||
+                  participant.kingdom_id === undefined
+                    ? null
+                    : kingdomColorMap[String(participant.kingdom_id)];
+                const colorLabel = formatColor(colorValue);
+                return (
+                  <option key={participant.id} value={participant.id}>
+                    {participant.user_id
+                      ? `User ${participant.user_id}`
+                      : `Participant ${participant.id}`} (seat{" "}
+                    {participant.seat_order}) - color {colorLabel}
+                  </option>
+                );
+              })}
             </select>
           </label>
           {selectedParticipant ? (
@@ -983,7 +1011,18 @@ export default function App() {
               participant_id: {selectedParticipant.id} | user_id:{" "}
               {selectedParticipant.user_id ?? "-"} | kingdom_id:{" "}
               {selectedParticipant.kingdom_id ?? "-"} | seat:{" "}
-              {selectedParticipant.seat_order ?? "-"}
+              {selectedParticipant.seat_order ?? "-"} | color:{" "}
+              {formatColor(selectedParticipantColor)}{" "}
+              <span
+                className="color-swatch"
+                style={{
+                  backgroundColor:
+                    selectedParticipantColor !== null
+                      ? formatColor(selectedParticipantColor)
+                      : "transparent",
+                  opacity: selectedParticipantColor !== null ? 1 : 0.35,
+                }}
+              />
             </div>
           ) : null}
           <label>

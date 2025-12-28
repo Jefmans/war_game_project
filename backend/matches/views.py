@@ -19,12 +19,9 @@ from matches.serializers import (
 )
 from matches.services import (
     ensure_turn,
-    get_active_participant,
     get_current_turn,
     get_max_turn,
-    get_participant_index,
     get_participants,
-    next_turn_for_index,
 )
 from units.models import Unit, UnitType
 from world.pathfinding import find_path, hex_distance
@@ -302,7 +299,7 @@ def create_match(request):
 
                 participants = get_participants(match)
                 count = len(participants)
-                if count and units_by_kingdom:
+                if count == 1 and units_by_kingdom:
                     towns = list(
                         Town.objects.filter(match=match).values(
                             "province_id", "q", "r"
@@ -318,15 +315,11 @@ def create_match(request):
                     max_turn = get_max_turn(match, now=timezone.now(), persist=False)
                     current_turn_number = match.last_resolved_turn + 1
 
-                    for index, participant in enumerate(participants):
+                    for participant in participants:
                         unit = units_by_kingdom.get(participant.kingdom_id)
                         if not unit:
                             continue
-                        next_turn = next_turn_for_index(
-                            current_turn_number, index, count
-                        )
-                        if next_turn is None:
-                            continue
+                        next_turn = current_turn_number
                         current_pos = (unit.q, unit.r)
                         path = None
                         target = None
@@ -352,8 +345,10 @@ def create_match(request):
                                 "unit_id": unit.id,
                                 "to": {"q": destination[0], "r": destination[1]},
                             }
-                            active_participant = participants[(next_turn - 1) % count]
-                            turn = ensure_turn(match, next_turn, active_participant)
+                            turn = ensure_turn(match, next_turn)
+                            if turn.active_participant_id is None:
+                                turn.active_participant = participant
+                                turn.save(update_fields=["active_participant"])
                             Order.objects.update_or_create(
                                 turn=turn,
                                 participant=participant,
@@ -373,7 +368,7 @@ def create_match(request):
                                     target = None
                                     path = None
                                     path_index = 0
-                            next_turn += count
+                            next_turn += 1
 
         chunk_payload = None
         if create_chunk and chunk:
@@ -407,8 +402,7 @@ def create_match(request):
 @api_view(["GET"])
 def match_state(request, match_id):
     match = get_object_or_404(Match, id=match_id)
-    current_turn_number = match.last_resolved_turn + 1
-    active_participant = get_active_participant(match, current_turn_number)
+    current_turn = get_current_turn(match)
     max_turn = get_max_turn(match, now=timezone.now(), persist=False)
 
     participants = list(
@@ -430,8 +424,8 @@ def match_state(request, match_id):
                 "max_turn_override": match.max_turn_override,
             },
             "current_turn": {
-                "number": current_turn_number,
-                "active_participant_id": active_participant.id if active_participant else None,
+                "number": current_turn.number,
+                "active_participant_id": current_turn.active_participant_id,
             },
             "max_turn": max_turn,
             "participants": participants,
@@ -473,42 +467,40 @@ def queue_orders(request, match_id):
         MatchParticipant, match=match, id=participant_id, is_active=True
     )
 
-    participants = get_participants(match)
-    count = len(participants)
-    if count == 0:
-        return Response(
-            {"detail": "match has no participants"},
-            status=status.HTTP_409_CONFLICT,
-        )
-
-    index = get_participant_index(participants, participant.id)
-    if index is None:
-        return Response(
-            {"detail": "participant not in match"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
     max_turn = get_max_turn(match, now=timezone.now(), persist=True)
-    current_turn_number = match.last_resolved_turn + 1
-    next_turn = next_turn_for_index(current_turn_number, index, count)
+    next_turn_number = match.last_resolved_turn + 1
 
     queued = []
     skipped = []
 
     for payload in orders:
-        if next_turn is None or next_turn > max_turn:
+        if next_turn_number > max_turn:
             skipped.append({"order": payload, "reason": "beyond max_turn"})
             continue
 
-        active_participant = participants[(next_turn - 1) % count]
-        turn = ensure_turn(match, next_turn, active_participant)
-        order, created = Order.objects.update_or_create(
-            turn=turn,
-            participant=participant,
-            defaults={"payload": payload},
-        )
-        queued.append({"turn": turn.number, "order_id": order.id, "created": created})
-        next_turn += count
+        assigned = False
+        candidate = next_turn_number
+        while candidate <= max_turn:
+            turn = ensure_turn(match, candidate)
+            if turn.active_participant_id is None:
+                turn.active_participant = participant
+                turn.save(update_fields=["active_participant"])
+            if turn.active_participant_id == participant.id:
+                order, created = Order.objects.update_or_create(
+                    turn=turn,
+                    participant=participant,
+                    defaults={"payload": payload},
+                )
+                queued.append(
+                    {"turn": turn.number, "order_id": order.id, "created": created}
+                )
+                next_turn_number = candidate + 1
+                assigned = True
+                break
+            candidate += 1
+
+        if not assigned:
+            skipped.append({"order": payload, "reason": "no available turn"})
 
     return Response(
         {
@@ -537,6 +529,14 @@ def resolve_until_max(request, match_id):
         current_turn = get_current_turn(match)
         if current_turn.number > max_turn:
             break
+        if current_turn.active_participant_id is None:
+            return Response(
+                {
+                    "detail": "turn has no active participant",
+                    "turn": current_turn.number,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         previous_resolved = match.last_resolved_turn
         result = resolve_turn(current_turn)
         match.refresh_from_db(fields=["last_resolved_turn"])
@@ -564,8 +564,7 @@ def resolve_until_max(request, match_id):
 @api_view(["GET"])
 def turn_state(request, match_id, turn_number):
     match = get_object_or_404(Match, id=match_id)
-    active_participant = get_active_participant(match, turn_number)
-    turn = ensure_turn(match, turn_number, active_participant)
+    turn = ensure_turn(match, turn_number)
     if turn.status != turn.STATUS_RESOLVED:
         return Response(
             {
@@ -609,14 +608,20 @@ def submit_order(request, match_id):
             status=status.HTTP_409_CONFLICT,
         )
 
-    if current_turn.active_participant_id != participant.id:
+    if (
+        current_turn.active_participant_id is not None
+        and current_turn.active_participant_id != participant.id
+    ):
         return Response(
             {
-                "detail": "not active participant",
+                "detail": "turn reserved by another participant",
                 "active_participant_id": current_turn.active_participant_id,
             },
             status=status.HTTP_409_CONFLICT,
         )
+    if current_turn.active_participant_id is None:
+        current_turn.active_participant = participant
+        current_turn.save(update_fields=["active_participant"])
 
     order, _ = Order.objects.update_or_create(
         turn=current_turn,
