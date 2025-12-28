@@ -1,13 +1,17 @@
+from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework.decorators import api_view
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework import status
 
-from matches.models import Match, MatchParticipant, Order
+from matches.models import Kingdom, Match, MatchParticipant, Order
 from matches.resolution import resolve_turn
 from matches.serializers import (
+    CreateMatchSerializer,
     MaxTurnOverrideSerializer,
     QueueOrdersSerializer,
     SubmitOrderSerializer,
@@ -22,6 +26,118 @@ from matches.services import (
     next_turn_for_index,
 )
 from world.models import Chunk, Land, Province
+
+
+@extend_schema(request=CreateMatchSerializer)
+@api_view(["POST"])
+def create_match(request):
+    serializer = CreateMatchSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    data = dict(serializer.validated_data)
+    participants_data = data.pop("participants", [])
+    start_now = data.pop("start_now", False)
+
+    if start_now and data.get("start_time") is None:
+        data["start_time"] = timezone.now()
+
+    user_model = get_user_model()
+    participants_payload = []
+
+    with transaction.atomic():
+        match = Match.objects.create(**data)
+        max_players = match.max_players
+        used_seat_orders = set()
+        used_user_ids = set()
+
+        for entry in participants_data:
+            seat_order = entry.get("seat_order")
+            if seat_order is None:
+                continue
+            if seat_order > max_players:
+                raise ValidationError(
+                    {"participants": f"seat_order {seat_order} exceeds max_players"}
+                )
+            if seat_order in used_seat_orders:
+                raise ValidationError(
+                    {"participants": f"seat_order {seat_order} is duplicated"}
+                )
+            used_seat_orders.add(seat_order)
+
+        next_seat = 1
+
+        for entry in participants_data:
+            seat_order = entry.get("seat_order")
+            if seat_order is None:
+                while next_seat in used_seat_orders:
+                    next_seat += 1
+                seat_order = next_seat
+                used_seat_orders.add(seat_order)
+
+            if seat_order > max_players:
+                raise ValidationError(
+                    {"participants": f"seat_order {seat_order} exceeds max_players"}
+                )
+
+            if entry.get("user_id"):
+                user = user_model.objects.filter(id=entry["user_id"]).first()
+                if not user:
+                    raise ValidationError(
+                        {"participants": f"user_id {entry['user_id']} not found"}
+                    )
+            else:
+                username = entry.get("username")
+                user = user_model.objects.filter(username=username).first()
+                if not user:
+                    user = user_model.objects.create_user(
+                        username=username,
+                        email=entry.get("email") or "",
+                        password=None,
+                    )
+
+            if user.id in used_user_ids:
+                raise ValidationError(
+                    {"participants": f"user_id {user.id} is duplicated"}
+                )
+            used_user_ids.add(user.id)
+
+            kingdom_name = entry.get("kingdom_name") or f"{user.username} Kingdom"
+            kingdom = Kingdom.objects.create(match=match, name=kingdom_name)
+
+            participant = MatchParticipant.objects.create(
+                match=match,
+                user=user,
+                seat_order=seat_order,
+                kingdom=kingdom,
+                is_active=entry.get("is_active", True),
+            )
+            participants_payload.append(
+                {
+                    "id": participant.id,
+                    "user_id": participant.user_id,
+                    "seat_order": participant.seat_order,
+                    "kingdom_id": participant.kingdom_id,
+                    "is_active": participant.is_active,
+                }
+            )
+
+    return Response(
+        {
+            "match": {
+                "id": match.id,
+                "name": match.name,
+                "status": match.status,
+                "max_players": match.max_players,
+                "turn_length_seconds": match.turn_length_seconds,
+                "start_time": match.start_time,
+                "last_resolved_turn": match.last_resolved_turn,
+                "max_turn_override": match.max_turn_override,
+                "world_seed": match.world_seed,
+            },
+            "participants": participants_payload,
+        },
+        status=status.HTTP_201_CREATED,
+    )
 
 
 @api_view(["GET"])
