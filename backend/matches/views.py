@@ -187,6 +187,17 @@ def create_match(request):
                 kingdom_max=chunk_options["kingdom_max"],
             )
             match.refresh_from_db(fields=["world_seed"])
+            kingdom_ids = [
+                payload["kingdom_id"]
+                for payload in participants_payload
+                if payload.get("kingdom_id")
+            ]
+            if kingdom_ids:
+                lands = list(Land.objects.filter(match=match).order_by("id"))
+                for index, land in enumerate(lands):
+                    land.kingdom_id = kingdom_ids[index % len(kingdom_ids)]
+                if lands:
+                    Land.objects.bulk_update(lands, ["kingdom"])
 
         chunk_payload = None
         if create_chunk:
