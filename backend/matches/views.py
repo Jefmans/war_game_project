@@ -60,6 +60,17 @@ def create_match(request):
     with transaction.atomic():
         match = Match.objects.create(**data)
         max_players = match.max_players
+
+        if not participants_data:
+            default_count = min(max_players, 2)
+            participants_data = [
+                {
+                    "username": f"participant{index + 1}",
+                    "seat_order": index + 1,
+                    "kingdom_name": f"kingdom{index + 1}",
+                }
+                for index in range(default_count)
+            ]
         used_seat_orders = set()
         used_user_ids = set()
 

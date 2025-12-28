@@ -58,7 +58,7 @@ class ParticipantInputSerializer(serializers.Serializer):
 class CreateMatchSerializer(serializers.Serializer):
     name = serializers.CharField(required=False, allow_blank=True)
     status = serializers.ChoiceField(choices=Match.STATUS_CHOICES, required=False)
-    max_players = serializers.IntegerField(required=False, min_value=1, default=10)
+    max_players = serializers.IntegerField(required=False, min_value=1, default=2)
     turn_length_seconds = serializers.IntegerField(
         required=False, min_value=10, default=10800
     )
@@ -69,7 +69,7 @@ class CreateMatchSerializer(serializers.Serializer):
     create_chunk = serializers.BooleanField(required=False, default=True)
     chunk_q = serializers.IntegerField(required=False, default=0)
     chunk_r = serializers.IntegerField(required=False, default=0)
-    chunk_size = serializers.IntegerField(required=False, default=64, min_value=1)
+    chunk_size = serializers.IntegerField(required=False, default=32, min_value=1)
     province_min = serializers.IntegerField(required=False, default=8, min_value=1)
     province_max = serializers.IntegerField(required=False, default=24, min_value=1)
     land_min = serializers.IntegerField(required=False, default=8, min_value=1)
