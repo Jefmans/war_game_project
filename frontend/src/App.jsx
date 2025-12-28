@@ -14,7 +14,7 @@ const ICON_BG_ALPHA = 0.35;
 const ICON_BG_RADIUS = 0.65;
 const TOWN_NEUTRAL_COLOR = 0xcbd5e1;
 const UNIT_NEUTRAL_COLOR = 0xd1d5db;
-const OWNED_TILE_ALPHA = 0.35;
+const OWNED_TILE_ALPHA = 0.15;
 const OWNED_BORDER_WIDTH = 2.6;
 const OWNED_BORDER_ALPHA = 1;
 
@@ -78,13 +78,6 @@ function drawHex(graphics, x, y, size, color, alpha = 1) {
     .poly(points)
     .fill({ color, alpha })
     .stroke(TILE_STROKE);
-}
-
-function drawHexOutline(graphics, x, y, size, color) {
-  const points = hexPoints(x, y, size);
-  graphics
-    .poly(points)
-    .stroke({ width: OWNED_BORDER_WIDTH, color, alpha: OWNED_BORDER_ALPHA });
 }
 
 function hexCorners(x, y, size) {
@@ -270,6 +263,7 @@ export default function App() {
       layersRef.current;
     const positions = new Map();
     const tileIndex = new Map();
+    const tileOwnerMap = new Map();
     tilesLayer.clear();
     landBordersLayer.clear();
     provinceBordersLayer.clear();
@@ -298,7 +292,8 @@ export default function App() {
     const tileColorMap = kingdomColorMap || {};
 
     tiles.forEach((cell) => {
-      const pos = positions.get(`${cell.q},${cell.r}`);
+      const key = `${cell.q},${cell.r}`;
+      const pos = positions.get(key);
       const provinceId = cell.province_id ?? null;
       const landId =
         provinceId !== null
@@ -306,6 +301,7 @@ export default function App() {
           : null;
       const kingdomId =
         landId !== null ? landToKingdomMap[String(landId)] ?? null : null;
+      tileOwnerMap.set(key, kingdomId ?? null);
       const ownerColor =
         kingdomId !== null
           ? tileColorMap[String(kingdomId)] ?? null
@@ -315,15 +311,43 @@ export default function App() {
         ownerColor ?? TERRAIN_COLORS[cell.terrain] ?? TERRAIN_COLORS.plains;
       const fillAlpha = isOwned ? OWNED_TILE_ALPHA : 1;
       drawHex(tilesLayer, pos.x, pos.y, HEX_SIZE, color, fillAlpha);
-      if (isOwned) {
-        drawHexOutline(
-          ownershipBordersLayer,
-          pos.x,
-          pos.y,
-          HEX_SIZE,
-          ownerColor
-        );
+    });
+
+    tiles.forEach((cell) => {
+      const key = `${cell.q},${cell.r}`;
+      const ownerId = tileOwnerMap.get(key);
+      if (ownerId === null || ownerId === undefined) {
+        return;
       }
+      const ownerColor = tileColorMap[String(ownerId)];
+      if (ownerColor === null || ownerColor === undefined) {
+        return;
+      }
+      const pos = positions.get(key);
+      if (!pos) {
+        return;
+      }
+      const corners = hexCorners(pos.x, pos.y, HEX_SIZE);
+
+      NEIGHBOR_OFFSETS.forEach(([dq, dr], index) => {
+        const neighborKey = `${cell.q + dq},${cell.r + dr}`;
+        const neighborOwner = tileOwnerMap.get(neighborKey);
+        if (neighborOwner === ownerId) {
+          return;
+        }
+
+        const [cornerA, cornerB] = EDGE_CORNER_INDEX[index];
+        const start = corners[cornerA];
+        const end = corners[cornerB];
+        ownershipBordersLayer
+          .moveTo(start.x, start.y)
+          .lineTo(end.x, end.y)
+          .stroke({
+            width: OWNED_BORDER_WIDTH,
+            color: ownerColor,
+            alpha: OWNED_BORDER_ALPHA,
+          });
+      });
     });
 
     if (showLandBorders) {
