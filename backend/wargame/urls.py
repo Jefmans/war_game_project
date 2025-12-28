@@ -13,6 +13,10 @@ urlpatterns = [
         "api/matches/<int:match_id>/max-turn/",
         match_views.set_max_turn_override,
     ),
+    path(
+        "api/matches/<int:match_id>/queue-orders/",
+        match_views.queue_orders,
+    ),
     path("api/matches/<int:match_id>/orders/", match_views.submit_order),
     path(
         "api/matches/<int:match_id>/chunks/<int:chunk_q>/<int:chunk_r>/",

@@ -7,8 +7,20 @@ from rest_framework import status
 
 from matches.models import Match, MatchParticipant, Order
 from matches.resolution import resolve_turn
-from matches.services import get_active_participant, get_current_turn, get_max_turn
-from matches.serializers import MaxTurnOverrideSerializer, SubmitOrderSerializer
+from matches.serializers import (
+    MaxTurnOverrideSerializer,
+    QueueOrdersSerializer,
+    SubmitOrderSerializer,
+)
+from matches.services import (
+    ensure_turn,
+    get_active_participant,
+    get_current_turn,
+    get_max_turn,
+    get_participant_index,
+    get_participants,
+    next_turn_for_index,
+)
 from world.models import Chunk
 
 
@@ -63,6 +75,67 @@ def set_max_turn_override(request, match_id):
             "match_id": match.id,
             "max_turn_override": match.max_turn_override,
             "max_turn": effective_max_turn,
+        }
+    )
+
+
+@extend_schema(request=QueueOrdersSerializer)
+@api_view(["POST"])
+def queue_orders(request, match_id):
+    match = get_object_or_404(Match, id=match_id)
+    serializer = QueueOrdersSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    participant_id = serializer.validated_data["participant_id"]
+    orders = serializer.validated_data["orders"]
+
+    participant = get_object_or_404(
+        MatchParticipant, match=match, id=participant_id, is_active=True
+    )
+
+    participants = get_participants(match)
+    count = len(participants)
+    if count == 0:
+        return Response(
+            {"detail": "match has no participants"},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    index = get_participant_index(participants, participant.id)
+    if index is None:
+        return Response(
+            {"detail": "participant not in match"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    max_turn = get_max_turn(match, now=timezone.now(), persist=True)
+    current_turn_number = match.last_resolved_turn + 1
+    next_turn = next_turn_for_index(current_turn_number, index, count)
+
+    queued = []
+    skipped = []
+
+    for payload in orders:
+        if next_turn is None or next_turn > max_turn:
+            skipped.append({"order": payload, "reason": "beyond max_turn"})
+            continue
+
+        active_participant = participants[(next_turn - 1) % count]
+        turn = ensure_turn(match, next_turn, active_participant)
+        order, created = Order.objects.update_or_create(
+            turn=turn,
+            participant=participant,
+            defaults={"payload": payload},
+        )
+        queued.append({"turn": turn.number, "order_id": order.id, "created": created})
+        next_turn += count
+
+    return Response(
+        {
+            "match_id": match.id,
+            "max_turn": max_turn,
+            "queued": queued,
+            "skipped": skipped,
         }
     )
 

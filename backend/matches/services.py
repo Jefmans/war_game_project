@@ -31,6 +31,24 @@ def get_participants(match):
     return list(match.participants.order_by("seat_order"))
 
 
+def get_participant_index(participants, participant_id):
+    for index, participant in enumerate(participants):
+        if participant.id == participant_id:
+            return index
+    return None
+
+
+def next_turn_for_index(start_turn, index, count):
+    if count <= 0:
+        return None
+    current_mod = (start_turn - 1) % count
+    if current_mod <= index:
+        delta = index - current_mod
+    else:
+        delta = count - (current_mod - index)
+    return start_turn + delta
+
+
 def get_active_participant(match, turn_number):
     participants = get_participants(match)
     if not participants:

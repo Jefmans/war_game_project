@@ -30,3 +30,8 @@ class SubmitOrderSerializer(serializers.Serializer):
 
 class MaxTurnOverrideSerializer(serializers.Serializer):
     max_turn = serializers.IntegerField(min_value=1, allow_null=True)
+
+
+class QueueOrdersSerializer(serializers.Serializer):
+    participant_id = serializers.IntegerField()
+    orders = OrderPayloadSerializer(many=True)
