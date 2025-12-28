@@ -66,6 +66,16 @@ class CreateMatchSerializer(serializers.Serializer):
     start_now = serializers.BooleanField(required=False, default=False)
     world_seed = serializers.IntegerField(required=False, allow_null=True)
     max_turn_override = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    create_chunk = serializers.BooleanField(required=False, default=True)
+    chunk_q = serializers.IntegerField(required=False, default=0)
+    chunk_r = serializers.IntegerField(required=False, default=0)
+    chunk_size = serializers.IntegerField(required=False, default=64, min_value=1)
+    province_min = serializers.IntegerField(required=False, default=8, min_value=1)
+    province_max = serializers.IntegerField(required=False, default=24, min_value=1)
+    land_min = serializers.IntegerField(required=False, default=8, min_value=1)
+    land_max = serializers.IntegerField(required=False, default=24, min_value=1)
+    kingdom_min = serializers.IntegerField(required=False, default=1, min_value=1)
+    kingdom_max = serializers.IntegerField(required=False, default=4, min_value=1)
     participants = ParticipantInputSerializer(many=True, required=False)
 
     def validate(self, data):
@@ -75,4 +85,17 @@ class CreateMatchSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"participants": "participants cannot exceed max_players"}
             )
+        if data.get("create_chunk", True):
+            if data.get("province_min", 1) > data.get("province_max", 1):
+                raise serializers.ValidationError(
+                    {"province_min": "province_min must be <= province_max"}
+                )
+            if data.get("land_min", 1) > data.get("land_max", 1):
+                raise serializers.ValidationError(
+                    {"land_min": "land_min must be <= land_max"}
+                )
+            if data.get("kingdom_min", 1) > data.get("kingdom_max", 1):
+                raise serializers.ValidationError(
+                    {"kingdom_min": "kingdom_min must be <= kingdom_max"}
+                )
         return data

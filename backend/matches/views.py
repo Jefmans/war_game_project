@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -37,6 +38,18 @@ def create_match(request):
     data = dict(serializer.validated_data)
     participants_data = data.pop("participants", [])
     start_now = data.pop("start_now", False)
+    create_chunk = data.pop("create_chunk", True)
+    chunk_options = {
+        "chunk_q": data.pop("chunk_q", 0),
+        "chunk_r": data.pop("chunk_r", 0),
+        "size": data.pop("chunk_size", 64),
+        "province_min": data.pop("province_min", 8),
+        "province_max": data.pop("province_max", 24),
+        "land_min": data.pop("land_min", 8),
+        "land_max": data.pop("land_max", 24),
+        "kingdom_min": data.pop("kingdom_min", 1),
+        "kingdom_max": data.pop("kingdom_max", 4),
+    }
 
     if start_now and data.get("start_time") is None:
         data["start_time"] = timezone.now()
@@ -121,6 +134,37 @@ def create_match(request):
                 }
             )
 
+        if create_chunk:
+            call_command(
+                "generate_world",
+                match=match.id,
+                chunk_q=chunk_options["chunk_q"],
+                chunk_r=chunk_options["chunk_r"],
+                size=chunk_options["size"],
+                province_min=chunk_options["province_min"],
+                province_max=chunk_options["province_max"],
+                land_min=chunk_options["land_min"],
+                land_max=chunk_options["land_max"],
+                kingdom_min=chunk_options["kingdom_min"],
+                kingdom_max=chunk_options["kingdom_max"],
+            )
+            match.refresh_from_db(fields=["world_seed"])
+
+        chunk_payload = None
+        if create_chunk:
+            chunk = Chunk.objects.filter(
+                match=match,
+                chunk_q=chunk_options["chunk_q"],
+                chunk_r=chunk_options["chunk_r"],
+            ).first()
+            if chunk:
+                chunk_payload = {
+                    "id": chunk.id,
+                    "chunk_q": chunk.chunk_q,
+                    "chunk_r": chunk.chunk_r,
+                    "size": chunk.size,
+                }
+
     return Response(
         {
             "match": {
@@ -134,6 +178,7 @@ def create_match(request):
                 "max_turn_override": match.max_turn_override,
                 "world_seed": match.world_seed,
             },
+            "chunk": chunk_payload,
             "participants": participants_payload,
         },
         status=status.HTTP_201_CREATED,
