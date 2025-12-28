@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as PIXI from "pixi.js";
-import { getChunk, getMatchState, getTurnState } from "./api";
+import { getChunk, getMatchState, getTurnState, queueOrders } from "./api";
 import swordmanUrl from "./assets/swordman.png";
 import townUrl from "./assets/town.png";
 
@@ -14,9 +14,11 @@ const ICON_BG_ALPHA = 0.75;
 const ICON_BG_RADIUS = 0.65;
 const TOWN_NEUTRAL_COLOR = 0xcbd5e1;
 const UNIT_NEUTRAL_COLOR = 0xd1d5db;
-const OWNED_TILE_ALPHA = 0.0;
+const OWNED_TILE_ALPHA = 0.1;
 const OWNED_BORDER_WIDTH = 2.6;
 const OWNED_BORDER_ALPHA = 1;
+const SELECTED_TILE_STROKE = { width: 2.4, color: 0xfbbf24, alpha: 0.9 };
+const SELECTED_TILE_FILL = { color: 0xfbbf24, alpha: 0.08 };
 
 const TERRAIN_COLORS = {
   plains: 0x5b8f64,
@@ -144,14 +146,40 @@ export default function App() {
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [iconTextures, setIconTextures] = useState(null);
+  const [participants, setParticipants] = useState([]);
+  const [selectedParticipantId, setSelectedParticipantId] = useState(null);
+  const [selectedUnitId, setSelectedUnitId] = useState(null);
+  const [selectedTile, setSelectedTile] = useState(null);
+  const [pendingOrders, setPendingOrders] = useState([]);
+  const [orderStatus, setOrderStatus] = useState("");
+  const [orderLoading, setOrderLoading] = useState(false);
+  const [viewMode, setViewMode] = useState("playback");
+  const [liveTurnNumber, setLiveTurnNumber] = useState(1);
 
   const containerRef = useRef(null);
   const appRef = useRef(null);
   const layersRef = useRef(null);
   const tilePositionsRef = useRef(new Map());
 
-  const canGoPrev = turnNumber > 1;
-  const canGoNext = turnNumber < lastResolved;
+  const displayTurn = viewMode === "live" ? liveTurnNumber : turnNumber;
+  const canGoPrev = viewMode === "playback" && turnNumber > 1;
+  const canGoNext = viewMode === "playback" && turnNumber < lastResolved;
+
+  const selectedParticipant = useMemo(
+    () =>
+      participants.find((participant) => participant.id === selectedParticipantId) ||
+      null,
+    [participants, selectedParticipantId]
+  );
+
+  const ownedUnits = useMemo(() => {
+    if (!selectedParticipant || !turnState?.units) {
+      return [];
+    }
+    return turnState.units.filter(
+      (unit) => unit.owner_kingdom_id === selectedParticipant.kingdom_id
+    );
+  }, [selectedParticipant, turnState]);
 
   const statusMessage = useMemo(() => {
     if (loading) {
@@ -162,6 +190,51 @@ export default function App() {
     }
     return "Ready.";
   }, [loading, status]);
+
+  useEffect(() => {
+    if (!participants.length) {
+      setSelectedParticipantId(null);
+      return;
+    }
+    if (
+      selectedParticipantId &&
+      participants.some((participant) => participant.id === selectedParticipantId)
+    ) {
+      return;
+    }
+    const activeCandidate = participants.some(
+      (participant) => participant.id === activeParticipant
+    )
+      ? activeParticipant
+      : null;
+    setSelectedParticipantId(activeCandidate ?? participants[0].id);
+  }, [participants, selectedParticipantId, activeParticipant]);
+
+  useEffect(() => {
+    if (!ownedUnits.length) {
+      setSelectedUnitId(null);
+      return;
+    }
+    if (selectedUnitId && ownedUnits.some((unit) => unit.id === selectedUnitId)) {
+      return;
+    }
+    setSelectedUnitId(ownedUnits[0].id);
+  }, [ownedUnits, selectedUnitId]);
+
+  useEffect(() => {
+    setPendingOrders([]);
+    setOrderStatus("");
+  }, [selectedParticipantId]);
+
+  useEffect(() => {
+    if (!selectedTile) {
+      return;
+    }
+    const key = `${selectedTile.q},${selectedTile.r}`;
+    if (!tilePositionsRef.current.has(key)) {
+      setSelectedTile(null);
+    }
+  }, [selectedTile, tiles]);
 
   useEffect(() => {
     let cancelled = false;
@@ -223,6 +296,7 @@ export default function App() {
       const landBordersLayer = new PIXI.Graphics();
       const provinceBordersLayer = new PIXI.Graphics();
       const ownershipBordersLayer = new PIXI.Graphics();
+      const selectionLayer = new PIXI.Graphics();
       const townLayer = new PIXI.Container();
       const unitFallbackLayer = new PIXI.Graphics();
       const unitIconsLayer = new PIXI.Container();
@@ -231,6 +305,7 @@ export default function App() {
       root.addChild(landBordersLayer);
       root.addChild(provinceBordersLayer);
       root.addChild(ownershipBordersLayer);
+      root.addChild(selectionLayer);
       root.addChild(townLayer);
       root.addChild(unitFallbackLayer);
       root.addChild(unitIconsLayer);
@@ -242,6 +317,7 @@ export default function App() {
         landBordersLayer,
         provinceBordersLayer,
         ownershipBordersLayer,
+        selectionLayer,
         townLayer,
         unitFallbackLayer,
         unitIconsLayer,
@@ -264,8 +340,14 @@ export default function App() {
       return;
     }
 
-    const { tilesLayer, landBordersLayer, provinceBordersLayer, ownershipBordersLayer, root } =
-      layersRef.current;
+    const {
+      tilesLayer,
+      landBordersLayer,
+      provinceBordersLayer,
+      ownershipBordersLayer,
+      selectionLayer,
+      root,
+    } = layersRef.current;
     const positions = new Map();
     const tileIndex = new Map();
     const tileOwnerMap = new Map();
@@ -273,6 +355,7 @@ export default function App() {
     landBordersLayer.clear();
     provinceBordersLayer.clear();
     ownershipBordersLayer.clear();
+    selectionLayer.clear();
 
     let minX = Infinity;
     let maxX = -Infinity;
@@ -465,6 +548,69 @@ export default function App() {
   ]);
 
   useEffect(() => {
+    if (!layersRef.current) {
+      return;
+    }
+    const { selectionLayer } = layersRef.current;
+    selectionLayer.clear();
+    if (!selectedTile) {
+      return;
+    }
+    const pos = tilePositionsRef.current.get(
+      `${selectedTile.q},${selectedTile.r}`
+    );
+    if (!pos) {
+      return;
+    }
+    selectionLayer
+      .poly(hexPoints(pos.x, pos.y, HEX_SIZE))
+      .fill(SELECTED_TILE_FILL)
+      .stroke(SELECTED_TILE_STROKE);
+  }, [selectedTile, tiles]);
+
+  useEffect(() => {
+    const app = appRef.current;
+    const layers = layersRef.current;
+    const canvas = app?.canvas;
+    if (!canvas || !layers) {
+      return;
+    }
+    const handleClick = (event) => {
+      const positions = tilePositionsRef.current;
+      if (!positions.size) {
+        return;
+      }
+      const rect = canvas.getBoundingClientRect();
+      const clickX = event.clientX - rect.left;
+      const clickY = event.clientY - rect.top;
+      const worldX = clickX - layers.root.position.x;
+      const worldY = clickY - layers.root.position.y;
+
+      let bestKey = null;
+      let bestDist = Infinity;
+      positions.forEach((pos, key) => {
+        const dx = pos.x - worldX;
+        const dy = pos.y - worldY;
+        const dist = dx * dx + dy * dy;
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestKey = key;
+        }
+      });
+
+      const maxDist = HEX_SIZE * 1.2;
+      if (!bestKey || bestDist > maxDist * maxDist) {
+        return;
+      }
+      const [q, r] = bestKey.split(",").map(Number);
+      setSelectedTile({ q, r });
+    };
+
+    canvas.addEventListener("click", handleClick);
+    return () => canvas.removeEventListener("click", handleClick);
+  }, [tiles]);
+
+  useEffect(() => {
     if (!tiles.length || !layersRef.current) {
       return;
     }
@@ -560,7 +706,7 @@ export default function App() {
     }
   };
 
-  const loadAll = async () => {
+  const loadAll = async (mode = viewMode) => {
     setLoading(true);
     setStatus("");
     try {
@@ -569,6 +715,9 @@ export default function App() {
       setLastResolved(resolved);
       setActiveParticipant(matchState.current_turn.active_participant_id);
       setTurnLength(matchState.match.turn_length_seconds);
+      setParticipants(matchState.participants || []);
+      const currentTurn = matchState.current_turn.number;
+      setLiveTurnNumber(currentTurn);
       const nextKingdomColorMap = {};
       (matchState.participants || [])
         .slice(0, PLAYER_TILE_COLORS.length)
@@ -579,9 +728,12 @@ export default function App() {
           }
         });
       setKingdomColorMap(nextKingdomColorMap);
-
-      const nextTurn = Math.min(turnNumber, resolved);
-      setTurnNumber(nextTurn);
+      const nextTurn =
+        mode === "live" ? currentTurn : Math.min(turnNumber, resolved);
+      if (mode === "playback") {
+        setTurnNumber(nextTurn);
+      }
+      setViewMode(mode);
 
       await loadTurnState(nextTurn);
     } catch (error) {
@@ -592,7 +744,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    loadAll();
+    loadAll("playback");
   }, []);
 
   const handlePrev = async () => {
@@ -611,6 +763,68 @@ export default function App() {
     const nextTurn = Math.min(lastResolved, turnNumber + 1);
     setTurnNumber(nextTurn);
     await loadTurnState(nextTurn);
+  };
+
+  const handleAddOrder = () => {
+    if (!selectedParticipantId) {
+      setOrderStatus("Select a participant first.");
+      return;
+    }
+    if (!selectedUnitId) {
+      setOrderStatus("Select a unit to move.");
+      return;
+    }
+    if (!selectedTile) {
+      setOrderStatus("Click a destination tile on the map.");
+      return;
+    }
+    setPendingOrders((prev) => [
+      ...prev,
+      {
+        type: "move",
+        unit_id: selectedUnitId,
+        to: { q: selectedTile.q, r: selectedTile.r },
+      },
+    ]);
+    setOrderStatus("");
+  };
+
+  const handleRemoveOrder = (index) => {
+    setPendingOrders((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleClearOrders = () => {
+    setPendingOrders([]);
+    setOrderStatus("");
+  };
+
+  const handleQueueOrders = async () => {
+    if (!selectedParticipantId) {
+      setOrderStatus("Select a participant first.");
+      return;
+    }
+    if (!pendingOrders.length) {
+      setOrderStatus("Add at least one order to queue.");
+      return;
+    }
+    setOrderLoading(true);
+    setOrderStatus("Queueing orders...");
+    try {
+      const response = await queueOrders(matchId, {
+        participant_id: selectedParticipantId,
+        orders: pendingOrders,
+      });
+      const queuedCount = response.queued?.length ?? 0;
+      const skippedCount = response.skipped?.length ?? 0;
+      const extra =
+        skippedCount > 0 ? ` Skipped ${skippedCount} beyond max turn.` : "";
+      setOrderStatus(`Queued ${queuedCount} order(s).${extra}`);
+      setPendingOrders([]);
+    } catch (error) {
+      setOrderStatus(error.message || "Failed to queue orders.");
+    } finally {
+      setOrderLoading(false);
+    }
   };
 
   return (
@@ -661,20 +875,151 @@ export default function App() {
               />
             </label>
           </div>
-          <button className="primary" onClick={loadAll} disabled={loading}>
-            Load Map
+          <button
+            className="primary"
+            onClick={() => loadAll("playback")}
+            disabled={loading}
+          >
+            Load Playback
           </button>
+
+          <div className="panel-title">View Mode</div>
+          <div className="button-row">
+            <button
+              onClick={() => loadAll("playback")}
+              disabled={loading || viewMode === "playback"}
+            >
+              Playback
+            </button>
+            <button
+              onClick={() => loadAll("live")}
+              disabled={loading || viewMode === "live"}
+            >
+              Live
+            </button>
+          </div>
 
           <div className="panel-title">Turn Controls</div>
           <div className="turn-meta">
             <div>
-              Viewing turn <strong>{turnNumber}</strong> of{" "}
+              {viewMode === "live" ? "Live turn" : "Viewing turn"}{" "}
+              <strong>{displayTurn}</strong> of{" "}
               <strong>{lastResolved}</strong>
             </div>
+            <div>Mode: {viewMode}</div>
             <div>Active participant: {activeParticipant ?? "-"}</div>
             <div>
               Turn length: {turnLength ? `${turnLength}s` : "-"}
             </div>
+          </div>
+          <div className="panel-title">Player Orders</div>
+          <label>
+            Participant
+            <select
+              value={selectedParticipantId ?? ""}
+              onChange={(event) => {
+                const value = event.target.value;
+                setSelectedParticipantId(value ? Number(value) : null);
+              }}
+            >
+              <option value="" disabled>
+                Choose participant
+              </option>
+              {participants.map((participant) => (
+                <option key={participant.id} value={participant.id}>
+                  {participant.user_id
+                    ? `User ${participant.user_id}`
+                    : `Participant ${participant.id}`} (seat {participant.seat_order})
+                </option>
+              ))}
+            </select>
+          </label>
+          {selectedParticipant ? (
+            <div className="meta">
+              participant_id: {selectedParticipant.id} | user_id:{" "}
+              {selectedParticipant.user_id ?? "-"} | kingdom_id:{" "}
+              {selectedParticipant.kingdom_id ?? "-"} | seat:{" "}
+              {selectedParticipant.seat_order ?? "-"}
+            </div>
+          ) : null}
+          <label>
+            Unit
+            <select
+              value={selectedUnitId ?? ""}
+              onChange={(event) => {
+                const value = event.target.value;
+                setSelectedUnitId(value ? Number(value) : null);
+              }}
+              disabled={!ownedUnits.length}
+            >
+              <option value="" disabled>
+                {ownedUnits.length ? "Choose unit" : "No owned units"}
+              </option>
+              {ownedUnits.map((unit) => (
+                <option key={unit.id} value={unit.id}>
+                  Unit {unit.id} ({unit.q},{unit.r})
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="meta">
+            Destination:{" "}
+            {selectedTile ? `${selectedTile.q}, ${selectedTile.r}` : "click a tile"}
+          </div>
+          <div className="button-row">
+            <button
+              onClick={() => setSelectedTile(null)}
+              disabled={!selectedTile}
+            >
+              Clear target
+            </button>
+            <button
+              className="primary"
+              onClick={handleAddOrder}
+              disabled={!selectedUnitId || !selectedTile}
+            >
+              Add move
+            </button>
+          </div>
+          <div className="orders-list">
+            {pendingOrders.length ? (
+              pendingOrders.map((order, index) => (
+                <div
+                  className="order-item"
+                  key={`${order.unit_id}-${index}`}
+                >
+                  <div>
+                    <div className="order-title">
+                      Move unit {order.unit_id}
+                    </div>
+                    <div className="order-meta">
+                      to {order.to.q}, {order.to.r}
+                    </div>
+                  </div>
+                  <button onClick={() => handleRemoveOrder(index)}>
+                    Remove
+                  </button>
+                </div>
+              ))
+            ) : (
+              <div className="order-empty">No queued orders yet.</div>
+            )}
+          </div>
+          <div className="button-row">
+            <button onClick={handleClearOrders} disabled={!pendingOrders.length}>
+              Clear list
+            </button>
+            <button
+              className="primary"
+              onClick={handleQueueOrders}
+              disabled={!pendingOrders.length || orderLoading}
+            >
+              Queue orders
+            </button>
+          </div>
+          {orderStatus ? <div className="hint">{orderStatus}</div> : null}
+          <div className="hint">
+            Tip: click a tile on the map to set the move destination.
           </div>
           <div className="panel-title">Overlays</div>
           <label className="toggle">
@@ -702,7 +1047,7 @@ export default function App() {
             </button>
           </div>
           <div className="hint">
-            Tip: use the queue orders API to pre-fill future turns.
+            Tip: queued orders fill upcoming turns for the selected participant.
           </div>
         </aside>
 

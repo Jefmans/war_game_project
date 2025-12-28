@@ -35,3 +35,11 @@ export function getChunk(matchId, chunkQ, chunkR, turnNumber) {
 export function getTurnState(matchId, turnNumber) {
   return request(`/api/matches/${matchId}/turns/${turnNumber}/state/`);
 }
+
+export function queueOrders(matchId, payload) {
+  return request(`/api/matches/${matchId}/queue-orders/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
