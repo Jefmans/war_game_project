@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as PIXI from "pixi.js";
 import { getChunk, getMatchState, getTurnState } from "./api";
 import infantryUrl from "./assets/infantry.svg";
-import castleUrl from "./assets/castle.svg";
+import castleUrl from "./assets/castle.png";
 
 const DEFAULT_MATCH_ID = Number(import.meta.env.VITE_MATCH_ID || 1);
 const DEFAULT_CHUNK_Q = Number(import.meta.env.VITE_CHUNK_Q || 0);
