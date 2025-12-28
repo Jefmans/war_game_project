@@ -21,7 +21,7 @@ from matches.services import (
     get_participants,
     next_turn_for_index,
 )
-from world.models import Chunk
+from world.models import Chunk, Province
 
 
 @api_view(["GET"])
@@ -213,6 +213,18 @@ def chunk_detail(request, match_id, chunk_q, chunk_r):
     chunk = get_object_or_404(
         Chunk, match_id=match_id, chunk_q=chunk_q, chunk_r=chunk_r
     )
+    cells = chunk.tiles.get("cells", [])
+    province_ids = {
+        cell.get("province_id")
+        for cell in cells
+        if cell.get("province_id") is not None
+    }
+    province_to_land = {}
+    if province_ids:
+        for province in Province.objects.filter(id__in=province_ids).values(
+            "id", "land_id"
+        ):
+            province_to_land[str(province["id"])] = province["land_id"]
     return Response(
         {
             "match_id": chunk.match_id,
@@ -221,5 +233,6 @@ def chunk_detail(request, match_id, chunk_q, chunk_r):
             "size": chunk.size,
             "tiles": chunk.tiles,
             "meta": chunk.meta,
+            "province_to_land": province_to_land,
         }
     )

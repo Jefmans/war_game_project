@@ -26,6 +26,7 @@ const KINGDOM_COLORS = [
 ];
 const TILE_STROKE = { width: 1, color: 0x1b232b, alpha: 0.6 };
 const UNIT_STROKE = { width: 2, color: 0x131d25, alpha: 0.7 };
+const LAND_STROKE = { width: 3.5, color: 0x2f2522, alpha: 0.85 };
 const PROVINCE_STROKE = { width: 2.5, color: 0xe3c878, alpha: 0.8 };
 const NEIGHBOR_OFFSETS = [
   [1, 0],
@@ -90,6 +91,7 @@ export default function App() {
   const [activeParticipant, setActiveParticipant] = useState(null);
   const [turnLength, setTurnLength] = useState(null);
   const [tiles, setTiles] = useState([]);
+  const [provinceToLand, setProvinceToLand] = useState({});
   const [turnState, setTurnState] = useState(null);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
@@ -140,18 +142,21 @@ export default function App() {
 
       const root = new PIXI.Container();
       const tilesLayer = new PIXI.Graphics();
-      const bordersLayer = new PIXI.Graphics();
+      const landBordersLayer = new PIXI.Graphics();
+      const provinceBordersLayer = new PIXI.Graphics();
       const unitsLayer = new PIXI.Graphics();
 
       root.addChild(tilesLayer);
-      root.addChild(bordersLayer);
+      root.addChild(landBordersLayer);
+      root.addChild(provinceBordersLayer);
       root.addChild(unitsLayer);
       app.stage.addChild(root);
 
       layersRef.current = {
         root,
         tilesLayer,
-        bordersLayer,
+        landBordersLayer,
+        provinceBordersLayer,
         unitsLayer,
       };
     };
@@ -172,11 +177,13 @@ export default function App() {
       return;
     }
 
-    const { tilesLayer, bordersLayer, root } = layersRef.current;
+    const { tilesLayer, landBordersLayer, provinceBordersLayer, root } =
+      layersRef.current;
     const positions = new Map();
     const tileIndex = new Map();
     tilesLayer.clear();
-    bordersLayer.clear();
+    landBordersLayer.clear();
+    provinceBordersLayer.clear();
 
     let minX = Infinity;
     let maxX = -Infinity;
@@ -196,10 +203,57 @@ export default function App() {
 
     tilePositionsRef.current = positions;
 
+    const provinceToLandMap = provinceToLand || {};
+
     tiles.forEach((cell) => {
       const pos = positions.get(`${cell.q},${cell.r}`);
       const color = TERRAIN_COLORS[cell.terrain] || TERRAIN_COLORS.plains;
       drawHex(tilesLayer, pos.x, pos.y, HEX_SIZE, color);
+    });
+
+    tiles.forEach((cell) => {
+      const key = `${cell.q},${cell.r}`;
+      const pos = positions.get(key);
+      if (!pos) {
+        return;
+      }
+      const corners = hexCorners(pos.x, pos.y, HEX_SIZE);
+      const currentProvince = cell.province_id ?? null;
+      const currentLand =
+        currentProvince !== null
+          ? provinceToLandMap[String(currentProvince)] ?? null
+          : null;
+
+      NEIGHBOR_OFFSETS.forEach(([dq, dr], index) => {
+        const neighborKey = `${cell.q + dq},${cell.r + dr}`;
+        const neighbor = tileIndex.get(neighborKey);
+        const neighborProvince = neighbor?.province_id ?? null;
+        const neighborLand =
+          neighborProvince !== null
+            ? provinceToLandMap[String(neighborProvince)] ?? null
+            : null;
+
+        if (neighbor && neighborLand === currentLand) {
+          return;
+        }
+
+        if (
+          neighbor &&
+          neighborLand !== null &&
+          currentLand !== null &&
+          currentLand > neighborLand
+        ) {
+          return;
+        }
+
+        const [cornerA, cornerB] = EDGE_CORNER_INDEX[index];
+        const start = corners[cornerA];
+        const end = corners[cornerB];
+        landBordersLayer
+          .moveTo(start.x, start.y)
+          .lineTo(end.x, end.y)
+          .stroke(LAND_STROKE);
+      });
     });
 
     tiles.forEach((cell) => {
@@ -232,7 +286,7 @@ export default function App() {
         const [cornerA, cornerB] = EDGE_CORNER_INDEX[index];
         const start = corners[cornerA];
         const end = corners[cornerB];
-        bordersLayer
+        provinceBordersLayer
           .moveTo(start.x, start.y)
           .lineTo(end.x, end.y)
           .stroke(PROVINCE_STROKE);
@@ -244,7 +298,7 @@ export default function App() {
     const offsetX = width / 2 - (minX + maxX) / 2;
     const offsetY = height / 2 - (minY + maxY) / 2;
     root.position.set(offsetX, offsetY);
-  }, [tiles]);
+  }, [tiles, provinceToLand]);
 
   useEffect(() => {
     if (!turnState || !layersRef.current) {
@@ -294,6 +348,7 @@ export default function App() {
 
       const chunk = await getChunk(matchId, chunkQ, chunkR);
       setTiles(chunk.tiles?.cells || []);
+      setProvinceToLand(chunk.province_to_land || {});
 
       await loadTurnState(nextTurn);
     } catch (error) {
