@@ -85,31 +85,45 @@ export default function App() {
       return;
     }
 
-    const app = new PIXI.Application({
-      backgroundAlpha: 0,
-      antialias: true,
-      resizeTo: containerRef.current,
-    });
+    const app = new PIXI.Application();
+    let disposed = false;
 
     appRef.current = app;
-    containerRef.current.appendChild(app.view);
 
-    const root = new PIXI.Container();
-    const tilesLayer = new PIXI.Graphics();
-    const unitsLayer = new PIXI.Graphics();
+    const init = async () => {
+      await app.init({
+        backgroundAlpha: 0,
+        antialias: true,
+        resizeTo: containerRef.current,
+      });
 
-    root.addChild(tilesLayer);
-    root.addChild(unitsLayer);
-    app.stage.addChild(root);
+      if (disposed) {
+        app.destroy(true);
+        return;
+      }
 
-    layersRef.current = {
-      root,
-      tilesLayer,
-      unitsLayer,
+      containerRef.current.appendChild(app.canvas);
+
+      const root = new PIXI.Container();
+      const tilesLayer = new PIXI.Graphics();
+      const unitsLayer = new PIXI.Graphics();
+
+      root.addChild(tilesLayer);
+      root.addChild(unitsLayer);
+      app.stage.addChild(root);
+
+      layersRef.current = {
+        root,
+        tilesLayer,
+        unitsLayer,
+      };
     };
 
+    init();
+
     return () => {
-      app.destroy(true, { children: true });
+      disposed = true;
+      app.destroy(true);
       appRef.current = null;
     };
   }, []);
