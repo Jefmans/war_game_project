@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <g stroke="#000" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Frame -->
+    <rect x="14" y="26" width="100" height="76" rx="6"/>
+    <!-- Infantry symbol -->
+    <path d="M34 46L94 82"/>
+    <path d="M94 46L34 82"/>
+  </g>
+</svg>

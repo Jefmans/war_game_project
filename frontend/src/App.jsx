@@ -1,11 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as PIXI from "pixi.js";
 import { getChunk, getMatchState, getTurnState } from "./api";
+import infantryUrl from "./assets/infantry.svg";
+import castleUrl from "./assets/castle.svg";
 
 const DEFAULT_MATCH_ID = Number(import.meta.env.VITE_MATCH_ID || 1);
 const DEFAULT_CHUNK_Q = Number(import.meta.env.VITE_CHUNK_Q || 0);
 const DEFAULT_CHUNK_R = Number(import.meta.env.VITE_CHUNK_R || 0);
 const HEX_SIZE = 12;
+const UNIT_ICON_SIZE = HEX_SIZE * 1.2;
+const CASTLE_ICON_SIZE = HEX_SIZE * 1.5;
 
 const TERRAIN_COLORS = {
   plains: 0x5b8f64,
@@ -100,6 +104,7 @@ export default function App() {
   const [showLandBorders, setShowLandBorders] = useState(true);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
+  const [iconTextures, setIconTextures] = useState(null);
 
   const containerRef = useRef(null);
   const appRef = useRef(null);
@@ -118,6 +123,35 @@ export default function App() {
     }
     return "Ready.";
   }, [loading, status]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadIcons = async () => {
+      try {
+        const [infantryTexture, castleTexture] = await Promise.all([
+          PIXI.Assets.load(infantryUrl),
+          PIXI.Assets.load(castleUrl),
+        ]);
+        if (!cancelled) {
+          setIconTextures({
+            infantry: infantryTexture,
+            castle: castleTexture,
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setIconTextures(null);
+        }
+      }
+    };
+
+    loadIcons();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current || appRef.current) {
@@ -149,12 +183,16 @@ export default function App() {
       const tilesLayer = new PIXI.Graphics();
       const landBordersLayer = new PIXI.Graphics();
       const provinceBordersLayer = new PIXI.Graphics();
-      const unitsLayer = new PIXI.Graphics();
+      const castleLayer = new PIXI.Container();
+      const unitFallbackLayer = new PIXI.Graphics();
+      const unitIconsLayer = new PIXI.Container();
 
       root.addChild(tilesLayer);
       root.addChild(landBordersLayer);
       root.addChild(provinceBordersLayer);
-      root.addChild(unitsLayer);
+      root.addChild(castleLayer);
+      root.addChild(unitFallbackLayer);
+      root.addChild(unitIconsLayer);
       app.stage.addChild(root);
 
       layersRef.current = {
@@ -162,7 +200,9 @@ export default function App() {
         tilesLayer,
         landBordersLayer,
         provinceBordersLayer,
-        unitsLayer,
+        castleLayer,
+        unitFallbackLayer,
+        unitIconsLayer,
       };
     };
 
@@ -331,26 +371,90 @@ export default function App() {
   ]);
 
   useEffect(() => {
+    if (!tiles.length || !layersRef.current) {
+      return;
+    }
+
+    const { castleLayer } = layersRef.current;
+    const positions = tilePositionsRef.current;
+
+    castleLayer.removeChildren();
+
+    if (!iconTextures?.castle) {
+      return;
+    }
+
+    const provinceToLandMap = provinceToLand || {};
+    const landToKingdomMap = landToKingdom || {};
+    const seenProvinces = new Set();
+
+    tiles.forEach((cell) => {
+      const provinceId = cell.province_id ?? null;
+      if (provinceId === null || seenProvinces.has(provinceId)) {
+        return;
+      }
+      seenProvinces.add(provinceId);
+      const landId = provinceToLandMap[String(provinceId)] ?? null;
+      const kingdomId =
+        landId !== null ? landToKingdomMap[String(landId)] ?? null : null;
+      if (kingdomId === null) {
+        return;
+      }
+      const pos = positions.get(`${cell.q},${cell.r}`);
+      if (!pos) {
+        return;
+      }
+      const sprite = new PIXI.Sprite(iconTextures.castle);
+      sprite.anchor.set(0.5);
+      sprite.width = CASTLE_ICON_SIZE;
+      sprite.height = CASTLE_ICON_SIZE;
+      sprite.tint =
+        kingdomColorMap[String(kingdomId)] ?? colorForKingdom(kingdomId);
+      sprite.alpha = 0.95;
+      sprite.position.set(pos.x, pos.y);
+      castleLayer.addChild(sprite);
+    });
+  }, [tiles, provinceToLand, landToKingdom, kingdomColorMap, iconTextures]);
+
+  useEffect(() => {
     if (!turnState || !layersRef.current) {
       return;
     }
 
-    const { unitsLayer } = layersRef.current;
+    const { unitFallbackLayer, unitIconsLayer } = layersRef.current;
     const positions = tilePositionsRef.current;
 
-    unitsLayer.clear();
+    unitFallbackLayer.clear();
+    unitIconsLayer.removeChildren();
+
+    const infantryTexture = iconTextures?.infantry;
 
     (turnState.units || []).forEach((unit) => {
       const pos = positions.get(`${unit.q},${unit.r}`);
       if (!pos) {
         return;
       }
-      unitsLayer
-        .circle(pos.x, pos.y, HEX_SIZE * 0.45)
-        .fill({ color: colorForKingdom(unit.owner_kingdom_id), alpha: 0.95 })
-        .stroke(UNIT_STROKE);
+      const tint =
+        kingdomColorMap[String(unit.owner_kingdom_id)] ??
+        colorForKingdom(unit.owner_kingdom_id);
+
+      if (infantryTexture) {
+        const sprite = new PIXI.Sprite(infantryTexture);
+        sprite.anchor.set(0.5);
+        sprite.width = UNIT_ICON_SIZE;
+        sprite.height = UNIT_ICON_SIZE;
+        sprite.tint = tint;
+        sprite.alpha = 0.95;
+        sprite.position.set(pos.x, pos.y);
+        unitIconsLayer.addChild(sprite);
+      } else {
+        unitFallbackLayer
+          .circle(pos.x, pos.y, HEX_SIZE * 0.45)
+          .fill({ color: tint, alpha: 0.95 })
+          .stroke(UNIT_STROKE);
+      }
     });
-  }, [turnState]);
+  }, [turnState, iconTextures, kingdomColorMap]);
 
   const loadTurnState = async (targetTurn) => {
     try {
