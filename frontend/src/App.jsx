@@ -158,6 +158,7 @@ export default function App() {
 
   const containerRef = useRef(null);
   const appRef = useRef(null);
+  const canvasRef = useRef(null);
   const layersRef = useRef(null);
   const tilePositionsRef = useRef(new Map());
 
@@ -290,6 +291,7 @@ export default function App() {
       }
 
       containerRef.current.appendChild(app.canvas);
+      canvasRef.current = app.canvas;
 
       const root = new PIXI.Container();
       const tilesLayer = new PIXI.Graphics();
@@ -332,6 +334,7 @@ export default function App() {
         app.destroy(true);
       }
       appRef.current = null;
+      canvasRef.current = null;
     };
   }, []);
 
@@ -569,9 +572,8 @@ export default function App() {
   }, [selectedTile, tiles]);
 
   useEffect(() => {
-    const app = appRef.current;
     const layers = layersRef.current;
-    const canvas = app?.canvas;
+    const canvas = canvasRef.current;
     if (!canvas || !layers) {
       return;
     }
