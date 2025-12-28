@@ -26,6 +26,23 @@ const KINGDOM_COLORS = [
 ];
 const TILE_STROKE = { width: 1, color: 0x1b232b, alpha: 0.6 };
 const UNIT_STROKE = { width: 2, color: 0x131d25, alpha: 0.7 };
+const PROVINCE_STROKE = { width: 2.5, color: 0xe3c878, alpha: 0.8 };
+const NEIGHBOR_OFFSETS = [
+  [1, 0],
+  [1, -1],
+  [0, -1],
+  [-1, 0],
+  [-1, 1],
+  [0, 1],
+];
+const EDGE_CORNER_INDEX = [
+  [0, 1],
+  [5, 0],
+  [4, 5],
+  [3, 4],
+  [2, 3],
+  [1, 2],
+];
 
 function axialToPixel(q, r, size) {
   const x = size * Math.sqrt(3) * (q + r / 2);
@@ -43,6 +60,18 @@ function drawHex(graphics, x, y, size, color) {
     .poly(points)
     .fill({ color })
     .stroke(TILE_STROKE);
+}
+
+function hexCorners(x, y, size) {
+  const corners = [];
+  for (let i = 0; i < 6; i += 1) {
+    const angle = (Math.PI / 180) * (60 * i - 30);
+    corners.push({
+      x: x + size * Math.cos(angle),
+      y: y + size * Math.sin(angle),
+    });
+  }
+  return corners;
 }
 
 function colorForKingdom(id) {
@@ -111,15 +140,18 @@ export default function App() {
 
       const root = new PIXI.Container();
       const tilesLayer = new PIXI.Graphics();
+      const bordersLayer = new PIXI.Graphics();
       const unitsLayer = new PIXI.Graphics();
 
       root.addChild(tilesLayer);
+      root.addChild(bordersLayer);
       root.addChild(unitsLayer);
       app.stage.addChild(root);
 
       layersRef.current = {
         root,
         tilesLayer,
+        bordersLayer,
         unitsLayer,
       };
     };
@@ -140,9 +172,11 @@ export default function App() {
       return;
     }
 
-    const { tilesLayer, root } = layersRef.current;
+    const { tilesLayer, bordersLayer, root } = layersRef.current;
     const positions = new Map();
+    const tileIndex = new Map();
     tilesLayer.clear();
+    bordersLayer.clear();
 
     let minX = Infinity;
     let maxX = -Infinity;
@@ -151,7 +185,9 @@ export default function App() {
 
     tiles.forEach((cell) => {
       const { x, y } = axialToPixel(cell.q, cell.r, HEX_SIZE);
-      positions.set(`${cell.q},${cell.r}`, { x, y });
+      const key = `${cell.q},${cell.r}`;
+      positions.set(key, { x, y });
+      tileIndex.set(key, cell);
       minX = Math.min(minX, x);
       maxX = Math.max(maxX, x);
       minY = Math.min(minY, y);
@@ -164,6 +200,43 @@ export default function App() {
       const pos = positions.get(`${cell.q},${cell.r}`);
       const color = TERRAIN_COLORS[cell.terrain] || TERRAIN_COLORS.plains;
       drawHex(tilesLayer, pos.x, pos.y, HEX_SIZE, color);
+    });
+
+    tiles.forEach((cell) => {
+      const key = `${cell.q},${cell.r}`;
+      const pos = positions.get(key);
+      if (!pos) {
+        return;
+      }
+      const corners = hexCorners(pos.x, pos.y, HEX_SIZE);
+      const currentProvince = cell.province_id ?? null;
+
+      NEIGHBOR_OFFSETS.forEach(([dq, dr], index) => {
+        const neighborKey = `${cell.q + dq},${cell.r + dr}`;
+        const neighbor = tileIndex.get(neighborKey);
+        const neighborProvince = neighbor?.province_id ?? null;
+
+        if (neighbor && neighborProvince === currentProvince) {
+          return;
+        }
+
+        if (
+          neighbor &&
+          neighborProvince !== null &&
+          currentProvince !== null &&
+          currentProvince > neighborProvince
+        ) {
+          return;
+        }
+
+        const [cornerA, cornerB] = EDGE_CORNER_INDEX[index];
+        const start = corners[cornerA];
+        const end = corners[cornerB];
+        bordersLayer
+          .moveTo(start.x, start.y)
+          .lineTo(end.x, end.y)
+          .stroke(PROVINCE_STROKE);
+      });
     });
 
     const width = appRef.current.renderer.width;
