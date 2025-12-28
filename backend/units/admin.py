@@ -15,6 +15,7 @@ class UnitAdmin(admin.ModelAdmin):
         "id",
         "match_id",
         "match",
+        "participant_id",
         "owner_kingdom_id",
         "owner_kingdom",
         "unit_type_id",
@@ -25,3 +26,9 @@ class UnitAdmin(admin.ModelAdmin):
         "status",
     )
     list_filter = ("match", "owner_kingdom", "status")
+    list_select_related = ("match", "owner_kingdom", "unit_type")
+
+    @admin.display(description="participant_id")
+    def participant_id(self, obj):
+        participant = obj.owner_kingdom.participants.first()
+        return participant.id if participant else None
