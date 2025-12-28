@@ -818,6 +818,51 @@ export default function App() {
     });
   }, [routePath, tiles]);
 
+
+  const planRouteTo = useCallback((destination) => {
+    if (!selectedUnit) {
+      setOrderStatus("Select a unit to plan a route.");
+      setRoutePath([]);
+      return;
+    }
+    const tileIndex = tileIndexRef.current;
+    if (!tileIndex.size) {
+      setOrderStatus("Map tiles are not ready yet.");
+      setRoutePath([]);
+      return;
+    }
+    const blocked = new Set();
+    (turnState?.units || []).forEach((unit) => {
+      if (unit.id !== selectedUnit.id) {
+        blocked.add(`${unit.q},${unit.r}`);
+      }
+    });
+    const start = [selectedUnit.q, selectedUnit.r];
+    const goal = [destination.q, destination.r];
+    const path = findPath(tileIndex, start, goal, blocked);
+    if (!path) {
+      setOrderStatus("No route found to that destination.");
+      setRoutePath([]);
+      return;
+    }
+    setRoutePath(path);
+    const movePoints = selectedUnit.move_points ?? 3;
+    const destinations = buildOrdersFromPath(path, tileIndex, movePoints);
+    if (!destinations.length) {
+      setOrderStatus("Route is blocked or too costly for this unit.");
+      setPendingOrders([]);
+      return;
+    }
+    const orders = destinations.map((dest) => ({
+      type: "move",
+      unit_id: selectedUnit.id,
+      to: { q: dest.q, r: dest.r },
+    }));
+    setPendingOrders(orders);
+    setOrderStatus(
+      `Planned route ${path.length - 1} step(s) over ${orders.length} turn(s).`
+    );
+  }, [selectedUnit, turnState]);
   useEffect(() => {
     const layers = layersRef.current;
     const canvas = canvasRef.current;
@@ -1128,51 +1173,6 @@ export default function App() {
     setTurnNumber(nextTurn);
     await loadTurnState(nextTurn);
   };
-
-  const planRouteTo = useCallback((destination) => {
-    if (!selectedUnit) {
-      setOrderStatus("Select a unit to plan a route.");
-      setRoutePath([]);
-      return;
-    }
-    const tileIndex = tileIndexRef.current;
-    if (!tileIndex.size) {
-      setOrderStatus("Map tiles are not ready yet.");
-      setRoutePath([]);
-      return;
-    }
-    const blocked = new Set();
-    (turnState?.units || []).forEach((unit) => {
-      if (unit.id !== selectedUnit.id) {
-        blocked.add(`${unit.q},${unit.r}`);
-      }
-    });
-    const start = [selectedUnit.q, selectedUnit.r];
-    const goal = [destination.q, destination.r];
-    const path = findPath(tileIndex, start, goal, blocked);
-    if (!path) {
-      setOrderStatus("No route found to that destination.");
-      setRoutePath([]);
-      return;
-    }
-    setRoutePath(path);
-    const movePoints = selectedUnit.move_points ?? 3;
-    const destinations = buildOrdersFromPath(path, tileIndex, movePoints);
-    if (!destinations.length) {
-      setOrderStatus("Route is blocked or too costly for this unit.");
-      setPendingOrders([]);
-      return;
-    }
-    const orders = destinations.map((dest) => ({
-      type: "move",
-      unit_id: selectedUnit.id,
-      to: { q: dest.q, r: dest.r },
-    }));
-    setPendingOrders(orders);
-    setOrderStatus(
-      `Planned route ${path.length - 1} step(s) over ${orders.length} turn(s).`
-    );
-  }, [selectedUnit, turnState]);
 
   const handleAddOrder = () => {
     if (!selectedParticipantId) {
